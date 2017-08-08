@@ -1,0 +1,17 @@
+[package]
+name = "vulkano-examples"
+version = "0.1.0"
+authors = ["Pierre Krieger <pierre.krieger1708@gmail.com>"]
+
+[dependencies]
+vulkano = "0.5.6"
+vulkano-shader-derive = "0.5.6"
+vulkano-win = "0.5.6"
+cgmath = "0.14.1"
+image = "0.14.0"
+winit = "0.7.0"
+time = "0.1.37"
+
+[[bin]]
+name = "triangle"
+path = "triangle/main.rs"
