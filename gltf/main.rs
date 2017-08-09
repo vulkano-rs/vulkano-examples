@@ -425,17 +425,30 @@ void main() {
     f_color.a = base_color.a;
 
 
+    // Add ambient occlusion.
+    {
+        float ao = 1.0;
+        if (u_material_params.occlusion_texture_tex_coord == 0) {
+            ao = texture(u_occlusion_texture, v_texcoord_0).x;
+        } else if (u_material_params.occlusion_texture_tex_coord == 1) {
+            ao = texture(u_occlusion_texture, v_texcoord_1).x;
+        }
+        f_color.rgb = mix(f_color.rgb, f_color.rgb * ao,
+                          u_material_params.occlusion_texture_strength);
+    }
 
     // Add the emissive color.
-    vec4 emissive = vec4(0.0);
-    if (u_material_params.emissive_texture_tex_coord == 0) {
-        emissive.rgb = texture(u_emissive_texture, v_texcoord_0).rgb;
-        emissive.a = 1.0;
-    } else if (u_material_params.emissive_texture_tex_coord == 1) {
-        emissive.rgb = texture(u_emissive_texture, v_texcoord_1).rgb;
-        emissive.a = 1.0;
+    {
+        vec4 emissive = vec4(0.0);
+        if (u_material_params.emissive_texture_tex_coord == 0) {
+            emissive.rgb = texture(u_emissive_texture, v_texcoord_0).rgb;
+            emissive.a = 1.0;
+        } else if (u_material_params.emissive_texture_tex_coord == 1) {
+            emissive.rgb = texture(u_emissive_texture, v_texcoord_1).rgb;
+            emissive.a = 1.0;
+        }
+        f_color.rgb += emissive.rgb * emissive.a;
     }
-    f_color.rgb += emissive.rgb * emissive.a;
 
 
     /*f_color.rgb = mix(f_color.rgb, fresnel_schlick_2, u_ScaleFGDSpec.x);
