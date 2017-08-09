@@ -162,8 +162,10 @@ fn main() {
         buffers
     };
 
-    // TODO: wrong ; forgot about textures/sources
     let gltf_textures = {
+        // TODO: use the sampler defined by the JSON struct
+        let sampler = Sampler::simple_repeat_linear(device.clone());
+
         let mut textures = Vec::new();
         for texture in gltf.textures() {
             let (dimensions, format, raw_pixels) = match texture.source().data() {
@@ -194,7 +196,7 @@ fn main() {
                                           Some(queue.family()), queue.clone())
                                           .expect("Failed to create immutable image")
             };
-            textures.push(img);
+            textures.push((img, sampler.clone()));
         }
         textures
     };
@@ -204,13 +206,12 @@ fn main() {
                                                    Some(queue.family()));
         let pipeline_layout = Arc::new(MyPipelineLayout.build(device.clone()).unwrap());
 
+        let dummy_sampler = Sampler::simple_repeat_linear(device.clone());
         let (dummy_texture, _) = 
                 ImmutableImage::from_iter([0u8].iter().cloned(),
                                           Dimensions::Dim2d { width: 1, height: 1 },
                                           Format::R8Unorm, Some(queue.family()), queue.clone())
                                           .expect("Failed to create immutable image");
-
-        let sampler = Sampler::simple_repeat_linear(device.clone());
 
         let mut materials = Vec::new();
         for material in gltf.as_json().materials.iter() {
@@ -242,34 +243,34 @@ fn main() {
             let base_color = material.pbr_metallic_roughness.as_ref()
                 .and_then(|t| t.base_color_texture.as_ref())
                 .map(|t| gltf_textures[t.index.value()].clone())
-                .unwrap_or(dummy_texture.clone());
+                .unwrap_or((dummy_texture.clone(), dummy_sampler.clone()));
             let metallic_roughness = material.pbr_metallic_roughness.as_ref()
                 .and_then(|t| t.metallic_roughness_texture.as_ref())
                 .map(|t| gltf_textures[t.index.value()].clone())
-                .unwrap_or(dummy_texture.clone());
+                .unwrap_or((dummy_texture.clone(), dummy_sampler.clone()));
             let normal_texture = material.normal_texture.as_ref()
                 .map(|t| gltf_textures[t.index.value()].clone())
-                .unwrap_or(dummy_texture.clone());
+                .unwrap_or((dummy_texture.clone(), dummy_sampler.clone()));
             let occlusion_texture = material.occlusion_texture.as_ref()
                 .map(|t| gltf_textures[t.index.value()].clone())
-                .unwrap_or(dummy_texture.clone());
+                .unwrap_or((dummy_texture.clone(), dummy_sampler.clone()));
             let emissive_texture = material.emissive_texture.as_ref()
                 .map(|t| gltf_textures[t.index.value()].clone())
-                .unwrap_or(dummy_texture.clone());
+                .unwrap_or((dummy_texture.clone(), dummy_sampler.clone()));
 
             let descriptor_set = 
                 Arc::new(PersistentDescriptorSet::start(pipeline_layout.clone(), 0)
                     .add_buffer(material_params)
                     .unwrap()
-                    .add_sampled_image(base_color, sampler.clone())
+                    .add_sampled_image(base_color.0, base_color.1)
                     .unwrap()
-                    .add_sampled_image(metallic_roughness, sampler.clone())
+                    .add_sampled_image(metallic_roughness.0, metallic_roughness.1)
                     .unwrap()
-                    .add_sampled_image(normal_texture, sampler.clone())
+                    .add_sampled_image(normal_texture.0, normal_texture.1)
                     .unwrap()
-                    .add_sampled_image(occlusion_texture, sampler.clone())
+                    .add_sampled_image(occlusion_texture.0, occlusion_texture.1)
                     .unwrap()
-                    .add_sampled_image(emissive_texture, sampler.clone())
+                    .add_sampled_image(emissive_texture.0, emissive_texture.1)
                     .unwrap()
                     .build()
                     .unwrap());
