@@ -23,13 +23,28 @@ use vulkano_win::VkSurfaceBuild;
 use vulkano::buffer::BufferAccess;
 use vulkano::buffer::BufferSlice;
 use vulkano::buffer::BufferUsage;
+use vulkano::buffer::CpuBufferPool;
 use vulkano::buffer::ImmutableBuffer;
 use vulkano::command_buffer::AutoCommandBufferBuilder;
 use vulkano::command_buffer::DynamicState;
+use vulkano::descriptor::descriptor::DescriptorBufferDesc;
+use vulkano::descriptor::descriptor::DescriptorBufferContentDesc;
+use vulkano::descriptor::descriptor::DescriptorImageDesc;
+use vulkano::descriptor::descriptor::DescriptorImageDescArray;
+use vulkano::descriptor::descriptor::DescriptorImageDescDimensions;
+use vulkano::descriptor::descriptor::DescriptorDesc;
+use vulkano::descriptor::descriptor::DescriptorDescTy;
+use vulkano::descriptor::descriptor::ShaderStages;
+use vulkano::descriptor::descriptor_set::PersistentDescriptorSet;
+use vulkano::descriptor::pipeline_layout::PipelineLayoutDesc;
+use vulkano::descriptor::pipeline_layout::PipelineLayoutDescNames;
+use vulkano::descriptor::pipeline_layout::PipelineLayoutDescPcRange;
 use vulkano::device::Device;
 use vulkano::format::Format;
 use vulkano::framebuffer::Framebuffer;
 use vulkano::framebuffer::Subpass;
+use vulkano::image::Dimensions;
+use vulkano::image::immutable::ImmutableImage;
 use vulkano::instance::Instance;
 use vulkano::pipeline::GraphicsPipeline;
 use vulkano::pipeline::input_assembly::PrimitiveTopology;
@@ -40,6 +55,7 @@ use vulkano::pipeline::vertex::InputRate;
 use vulkano::pipeline::vertex::VertexDefinition;
 use vulkano::pipeline::vertex::VertexSource;
 use vulkano::pipeline::viewport::Viewport;
+use vulkano::sampler::Sampler;
 use vulkano::swapchain;
 use vulkano::swapchain::PresentMode;
 use vulkano::swapchain::SurfaceTransform;
@@ -146,6 +162,123 @@ fn main() {
         buffers
     };
 
+    // TODO: wrong ; forgot about textures/sources
+    let gltf_textures = {
+        let mut textures = Vec::new();
+        for texture in gltf.textures() {
+            let (dimensions, format, raw_pixels) = match texture.source().data() {
+                // Note that the gltf crate doesn't allow us to extract the image data without
+                // cloning.
+                &gltf::import::data::DynamicImage::ImageLuma8(ref buf) => {
+                    let dimensions = Dimensions::Dim2d { width: buf.width(), height: buf.height() };
+                    (dimensions, Format::R8Unorm, buf.clone().into_raw())
+                },
+                &gltf::import::data::DynamicImage::ImageLumaA8(ref buf) => {
+                    let dimensions = Dimensions::Dim2d { width: buf.width(), height: buf.height() };
+                    (dimensions, Format::R8G8Unorm, buf.clone().into_raw())
+                },
+                &gltf::import::data::DynamicImage::ImageRgb8(ref buf) => {
+                    // Since RGB is often not supported by Vulkan, convert to RGBA instead.
+                    let dimensions = Dimensions::Dim2d { width: buf.width(), height: buf.height() };
+                    let rgba = gltf::import::data::DynamicImage::ImageRgb8(buf.clone()).to_rgba();
+                    (dimensions, Format::R8G8B8A8Unorm, rgba.into_raw())
+                },
+                &gltf::import::data::DynamicImage::ImageRgba8(ref buf) => {
+                    let dimensions = Dimensions::Dim2d { width: buf.width(), height: buf.height() };
+                    (dimensions, Format::R8G8B8A8Unorm, buf.clone().into_raw())
+                },
+            };
+
+            let (img, future) = {
+                ImmutableImage::from_iter(raw_pixels.into_iter(), dimensions, format,
+                                          Some(queue.family()), queue.clone())
+                                          .expect("Failed to create immutable image")
+            };
+            textures.push(img);
+        }
+        textures
+    };
+
+    let gltf_materials = {
+        let mut params_buffer = CpuBufferPool::new(device.clone(), BufferUsage::uniform_buffer(),
+                                                   Some(queue.family()));
+        let pipeline_layout = Arc::new(MyPipelineLayout.build(device.clone()).unwrap());
+
+        let (dummy_texture, _) = 
+                ImmutableImage::from_iter([0u8].iter().cloned(),
+                                          Dimensions::Dim2d { width: 1, height: 1 },
+                                          Format::R8Unorm, Some(queue.family()), queue.clone())
+                                          .expect("Failed to create immutable image");
+
+        let sampler = Sampler::simple_repeat_linear(device.clone());
+
+        let mut materials = Vec::new();
+        for material in gltf.as_json().materials.iter() {
+            let material_params = params_buffer.next(fs::ty::MaterialParams {
+                base_color_factor: material.pbr_metallic_roughness.as_ref()
+                                .map(|t| t.base_color_factor.0).unwrap_or([1.0, 1.0, 1.0, 1.0]),
+                base_color_texture_tex_coord: material.pbr_metallic_roughness.as_ref()
+                            .and_then(|t| t.base_color_texture.as_ref()).map(|t| t.tex_coord as i32).unwrap_or(-1),
+                metallic_factor: material.pbr_metallic_roughness.as_ref()
+                                                    .map(|t| t.metallic_factor.0).unwrap_or(1.0),
+                roughness_factor: material.pbr_metallic_roughness.as_ref()
+                                                    .map(|t| t.roughness_factor.0).unwrap_or(1.0),
+                metallic_roughness_texture_tex_coord: material.pbr_metallic_roughness.as_ref()
+                    .and_then(|t| t.metallic_roughness_texture.as_ref()).map(|t| t.tex_coord as i32).unwrap_or(-1),
+                normal_texture_scale: material.normal_texture.as_ref()
+                                                             .map(|t| t.scale).unwrap_or(0.0),
+                normal_texture_tex_coord: material.normal_texture.as_ref()
+                                                    .map(|t| t.tex_coord as i32).unwrap_or(-1),
+                occlusion_texture_tex_coord: material.occlusion_texture.as_ref()
+                                                     .map(|t| t.tex_coord as i32).unwrap_or(-1),
+                occlusion_texture_strength: material.occlusion_texture.as_ref()
+                                                    .map(|t| t.strength.0).unwrap_or(0.0),
+                emissive_texture_tex_coord: material.emissive_texture.as_ref()
+                                                    .map(|t| t.tex_coord as i32).unwrap_or(-1),
+                emissive_factor: material.emissive_factor.0,
+                _dummy0: [0; 12],
+            });
+
+            let base_color = material.pbr_metallic_roughness.as_ref()
+                .and_then(|t| t.base_color_texture.as_ref())
+                .map(|t| gltf_textures[t.index.value()].clone())
+                .unwrap_or(dummy_texture.clone());
+            let metallic_roughness = material.pbr_metallic_roughness.as_ref()
+                .and_then(|t| t.metallic_roughness_texture.as_ref())
+                .map(|t| gltf_textures[t.index.value()].clone())
+                .unwrap_or(dummy_texture.clone());
+            let normal_texture = material.normal_texture.as_ref()
+                .map(|t| gltf_textures[t.index.value()].clone())
+                .unwrap_or(dummy_texture.clone());
+            let occlusion_texture = material.occlusion_texture.as_ref()
+                .map(|t| gltf_textures[t.index.value()].clone())
+                .unwrap_or(dummy_texture.clone());
+            let emissive_texture = material.emissive_texture.as_ref()
+                .map(|t| gltf_textures[t.index.value()].clone())
+                .unwrap_or(dummy_texture.clone());
+
+            let descriptor_set = 
+                Arc::new(PersistentDescriptorSet::start(pipeline_layout.clone(), 0)
+                    .add_buffer(material_params)
+                    .unwrap()
+                    .add_sampled_image(base_color, sampler.clone())
+                    .unwrap()
+                    .add_sampled_image(metallic_roughness, sampler.clone())
+                    .unwrap()
+                    .add_sampled_image(normal_texture, sampler.clone())
+                    .unwrap()
+                    .add_sampled_image(occlusion_texture, sampler.clone())
+                    .unwrap()
+                    .add_sampled_image(emissive_texture, sampler.clone())
+                    .unwrap()
+                    .build()
+                    .unwrap());
+
+            materials.push(descriptor_set);
+        }
+        materials
+    };
+
 
     mod vs {
         #[derive(VulkanoShader)]
@@ -163,8 +296,12 @@ layout(location = 6) in vec4 i_joints_0;
 layout(location = 7) in vec4 i_weights_0;
 
 layout(location = 0) out vec3 v_normal;
+layout(location = 1) out vec2 v_texcoord_0;
+layout(location = 2) out vec2 v_texcoord_1;
 
 void main() {
+    v_texcoord_0 = i_texcoord_0;
+    v_texcoord_1 = i_texcoord_1;
     v_normal = i_normal;
 
     gl_Position = vec4(i_position, 1.0);
@@ -180,14 +317,50 @@ void main() {
         #[src = "
 #version 450
 
+layout(set = 0, binding = 0) uniform MaterialParams {
+    vec4 base_color_factor;
+    int base_color_texture_tex_coord;
+    float metallic_factor;
+    float roughness_factor;
+    int metallic_roughness_texture_tex_coord;
+    float normal_texture_scale;
+    int normal_texture_tex_coord;
+    int occlusion_texture_tex_coord;
+    float occlusion_texture_strength;
+    int emissive_texture_tex_coord;
+    vec3 emissive_factor;
+} material_params;
+
+layout(set = 0, binding = 1) uniform sampler2D base_color;
+layout(set = 0, binding = 2) uniform sampler2D metallic_roughness;
+layout(set = 0, binding = 3) uniform sampler2D normal_texture;
+layout(set = 0, binding = 4) uniform sampler2D occlusion_texture;
+layout(set = 0, binding = 5) uniform sampler2D emissive_texture;
+
 layout(location = 0) in vec3 v_normal;
+layout(location = 1) in vec2 v_texcoord_0;
+layout(location = 2) in vec2 v_texcoord_1;
 
 layout(location = 0) out vec4 f_color;
 
 void main() {
     float shadow = max(0.0, dot(v_normal, normalize(vec3(-0.7, -0.3, 0.4))));
 
-    f_color = vec4(1.0, 0.0, 0.0, 1.0) * mix(0.3, 1.0, shadow);
+    vec4 base = vec4(0.0);
+    if (material_params.base_color_texture_tex_coord == 0) {
+        base.rgb = texture(base_color, v_texcoord_0).rgb;
+    } else if (material_params.base_color_texture_tex_coord == 1) {
+        base.rgb = texture(base_color, v_texcoord_1).rgb;
+    }
+    base *= material_params.base_color_factor;
+
+    vec4 emissive = vec4(0.0);
+    if (material_params.emissive_texture_tex_coord == 0) {
+        emissive.rgb = texture(emissive_texture, v_texcoord_0).rgb;
+    }
+
+    f_color.rgb = base.rgb * mix(0.3, 1.0, shadow);
+    f_color.a = 1.0;
 }
 "]
         struct Dummy;
@@ -222,6 +395,10 @@ void main() {
                     gltf::json::mesh::Mode::TriangleFan => PrimitiveTopology::TriangleFan,
                 };
 
+                let material_id = primitive.material.as_ref().expect("Default material not supported").value();
+
+                // TODO: adjust some pipeline params based on material
+
                 let pipeline = {
                     let vs = vs::Shader::load(device.clone()).expect("failed to create shader module");
                     let fs = fs::Shader::load(device.clone()).expect("failed to create shader module");
@@ -236,7 +413,7 @@ void main() {
                         .unwrap())
                 };
 
-                mesh_prim_out.push((pipeline, vertex_buffer_ids, index_buffer));
+                mesh_prim_out.push((pipeline, vertex_buffer_ids, index_buffer, gltf_materials[material_id].clone()));
             }
             meshes.push(mesh_prim_out);
         }
@@ -291,7 +468,7 @@ void main() {
             .unwrap();
 
         for mesh in meshes.iter() {
-            for &(ref pipeline, ref vertex_buffer_ids, ref index_buffer) in mesh.iter() {
+            for &(ref pipeline, ref vertex_buffer_ids, ref index_buffer, ref material_ds) in mesh.iter() {
                 let vertex_buffers = vertex_buffer_ids.iter().map(|&(vb_id, offset)| {
                     let buf = gltf_buffers[vb_id].clone();
                     let buf_len = buf.len();
@@ -315,12 +492,12 @@ void main() {
                     let indices = indices.clone().slice(0..num_indices as usize).unwrap();
                     builder = builder.draw_indexed(pipeline.clone(),
                         dynamic_state,
-                        vertex_buffers, indices, (), ())
+                        vertex_buffers, indices, material_ds.clone(), ())
                         .unwrap();
                 } else {
                     builder = builder.draw(pipeline.clone(),
                         dynamic_state,
-                        vertex_buffers, (), ())
+                        vertex_buffers, material_ds.clone(), ())
                         .unwrap();
                 }
             }
@@ -462,5 +639,130 @@ unsafe impl VertexSource<Vec<Arc<BufferAccess + Send + Sync>>> for RuntimeVertex
         -> (Vec<Box<BufferAccess + Send + Sync>>, usize, usize)
     {
         (bufs.into_iter().map(|b| Box::new(b) as Box<_>).collect(), self.num_vertices as usize, 1)
+    }
+}
+
+#[derive(Debug, Copy, Clone)]
+struct MyPipelineLayout;
+
+unsafe impl PipelineLayoutDesc for MyPipelineLayout {
+    fn num_sets(&self) -> usize { 1 }
+    fn num_bindings_in_set(&self, set: usize) -> Option<usize> {
+        match set { 0 => Some(6), _ => None, }
+    }
+    fn descriptor(&self, set: usize, binding: usize)
+        -> Option<DescriptorDesc> {
+        match (set, binding) {
+            (0, 0) =>
+            Some(DescriptorDesc{ty:
+                                    DescriptorDescTy::Buffer(DescriptorBufferDesc{dynamic:
+                                                                                        Some(false),
+                                                                                    storage:
+                                                                                        false,
+                                                                                    content:
+                                                                                        DescriptorBufferContentDesc::F32,}),
+                                array_count: 1,
+                                stages: ShaderStages { fragment: true, .. ShaderStages::none() },
+                                readonly: true,}),
+            (0, 1) =>
+            Some(DescriptorDesc{ty:
+                                    DescriptorDescTy::CombinedImageSampler(DescriptorImageDesc{sampled:
+                                                                                                    true,
+                                                                                                dimensions:
+                                                                                                    DescriptorImageDescDimensions::TwoDimensional,
+                                                                                                format:
+                                                                                                    None,
+                                                                                                multisampled:
+                                                                                                    false,
+                                                                                                array_layers:
+                                                                                                    DescriptorImageDescArray::NonArrayed,}),
+                                array_count: 1,
+                                stages: ShaderStages { fragment: true, .. ShaderStages::none() },
+                                readonly: true,}),
+            (0, 2) =>
+            Some(DescriptorDesc{ty:
+                                    DescriptorDescTy::CombinedImageSampler(DescriptorImageDesc{sampled:
+                                                                                                    true,
+                                                                                                dimensions:
+                                                                                                    DescriptorImageDescDimensions::TwoDimensional,
+                                                                                                format:
+                                                                                                    None,
+                                                                                                multisampled:
+                                                                                                    false,
+                                                                                                array_layers:
+                                                                                                    DescriptorImageDescArray::NonArrayed,}),
+                                array_count: 1,
+                                stages: ShaderStages { fragment: true, .. ShaderStages::none() },
+                                readonly: true,}),
+            (0, 3) =>
+            Some(DescriptorDesc{ty:
+                                    DescriptorDescTy::CombinedImageSampler(DescriptorImageDesc{sampled:
+                                                                                                    true,
+                                                                                                dimensions:
+                                                                                                    DescriptorImageDescDimensions::TwoDimensional,
+                                                                                                format:
+                                                                                                    None,
+                                                                                                multisampled:
+                                                                                                    false,
+                                                                                                array_layers:
+                                                                                                    DescriptorImageDescArray::NonArrayed,}),
+                                array_count: 1,
+                                stages: ShaderStages { fragment: true, .. ShaderStages::none() },
+                                readonly: true,}),
+            (0, 4) =>
+            Some(DescriptorDesc{ty:
+                                    DescriptorDescTy::CombinedImageSampler(DescriptorImageDesc{sampled:
+                                                                                                    true,
+                                                                                                dimensions:
+                                                                                                    DescriptorImageDescDimensions::TwoDimensional,
+                                                                                                format:
+                                                                                                    None,
+                                                                                                multisampled:
+                                                                                                    false,
+                                                                                                array_layers:
+                                                                                                    DescriptorImageDescArray::NonArrayed,}),
+                                array_count: 1,
+                                stages: ShaderStages { fragment: true, .. ShaderStages::none() },
+                                readonly: true,}),
+            (0, 5) =>
+            Some(DescriptorDesc{ty:
+                                    DescriptorDescTy::CombinedImageSampler(DescriptorImageDesc{sampled:
+                                                                                                    true,
+                                                                                                dimensions:
+                                                                                                    DescriptorImageDescDimensions::TwoDimensional,
+                                                                                                format:
+                                                                                                    None,
+                                                                                                multisampled:
+                                                                                                    false,
+                                                                                                array_layers:
+                                                                                                    DescriptorImageDescArray::NonArrayed,}),
+                                array_count: 1,
+                                stages: ShaderStages { fragment: true, .. ShaderStages::none() },
+                                readonly: true,}),
+            _ => None,
+        }
+    }
+    fn num_push_constants_ranges(&self) -> usize { 0 }
+    fn push_constants_range(&self, num: usize)
+        -> Option<PipelineLayoutDescPcRange> {
+        if num != 0 || 0 == 0 { return None; }
+        Some(PipelineLayoutDescPcRange{offset: 0,
+                                        size: 0,
+                                        stages: ShaderStages::all(),})
+    }
+}
+
+unsafe impl PipelineLayoutDescNames for MyPipelineLayout {
+    fn descriptor_by_name(&self, name: &str)
+        -> Option<(usize, usize)> {
+        match name {
+            "material_params" => Some((0, 0)),
+            "base_color" => Some((0, 1)),
+            "metallic_roughness" => Some((0, 2)),
+            "normal_texture" => Some((0, 3)),
+            "occlusion_texture" => Some((0, 4)),
+            "emissive_texture" => Some((0, 5)),
+            _ => None,
+        }
     }
 }
