@@ -173,21 +173,21 @@ fn main() {
                 // cloning.
                 &gltf::import::data::DynamicImage::ImageLuma8(ref buf) => {
                     let dimensions = Dimensions::Dim2d { width: buf.width(), height: buf.height() };
-                    (dimensions, Format::R8Unorm, buf.clone().into_raw())
+                    (dimensions, Format::R8Srgb, buf.clone().into_raw())
                 },
                 &gltf::import::data::DynamicImage::ImageLumaA8(ref buf) => {
                     let dimensions = Dimensions::Dim2d { width: buf.width(), height: buf.height() };
-                    (dimensions, Format::R8G8Unorm, buf.clone().into_raw())
+                    (dimensions, Format::R8G8Srgb, buf.clone().into_raw())
                 },
                 &gltf::import::data::DynamicImage::ImageRgb8(ref buf) => {
                     // Since RGB is often not supported by Vulkan, convert to RGBA instead.
                     let dimensions = Dimensions::Dim2d { width: buf.width(), height: buf.height() };
                     let rgba = gltf::import::data::DynamicImage::ImageRgb8(buf.clone()).to_rgba();
-                    (dimensions, Format::R8G8B8A8Unorm, rgba.into_raw())
+                    (dimensions, Format::R8G8B8A8Srgb, rgba.into_raw())
                 },
                 &gltf::import::data::DynamicImage::ImageRgba8(ref buf) => {
                     let dimensions = Dimensions::Dim2d { width: buf.width(), height: buf.height() };
-                    (dimensions, Format::R8G8B8A8Unorm, buf.clone().into_raw())
+                    (dimensions, Format::R8G8B8A8Srgb, buf.clone().into_raw())
                 },
             };
 
