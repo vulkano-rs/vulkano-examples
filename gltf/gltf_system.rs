@@ -49,6 +49,9 @@ use vulkano::pipeline::vertex::VertexSource;
 use vulkano::pipeline::viewport::Viewport;
 use vulkano::sampler::Sampler;
 
+use cgmath::Matrix4;
+use cgmath::SquareMatrix;
+
 use std::sync::Arc;
 use std::vec::IntoIter as VecIntoIter;
 
@@ -319,7 +322,8 @@ impl GltfModel {
                       mut builder: AutoCommandBufferBuilder) -> AutoCommandBufferBuilder
     {
         for node in self.gltf.as_json().scenes[scene_id].nodes.iter() {
-            builder = self.draw_node(node.value(), viewport_dimensions, builder);
+            builder = self.draw_node(node.value(), Matrix4::identity(), viewport_dimensions,
+                                     builder);
         }
 
         builder
@@ -331,16 +335,29 @@ impl GltfModel {
     //
     // - Panics if the node is out of range.
     //
-    fn draw_node(&self, node_id: usize, viewport_dimensions: [u32; 2],
-                 mut builder: AutoCommandBufferBuilder) -> AutoCommandBufferBuilder
+    fn draw_node(&self, node_id: usize, world_to_framebuffer: Matrix4<f32>,
+                 viewport_dimensions: [u32; 2], mut builder: AutoCommandBufferBuilder)
+                 -> AutoCommandBufferBuilder
     {
-        if let Some(ref mesh) = self.gltf.as_json().nodes[node_id].mesh {
-            builder = self.draw_mesh(mesh.value(), viewport_dimensions, builder);
+        let node = &self.gltf.as_json().nodes[node_id];
+
+        let local_matrix = world_to_framebuffer * {
+            let m = node.matrix;
+            Matrix4::new(m[ 0], m[ 1], m[ 2], m[ 3],
+                         m[ 4], m[ 5], m[ 6], m[ 7],
+                         m[ 8], m[ 9], m[10], m[11],
+                         m[12], m[13], m[14], m[15])
+        };
+
+        // TODO: handle TSR correctly
+
+        if let Some(ref mesh) = node.mesh {
+            builder = self.draw_mesh(mesh.value(), local_matrix, viewport_dimensions, builder);
         }
 
-        if let Some(ref children) = self.gltf.as_json().nodes[node_id].children {
+        if let Some(ref children) = node.children {
             for child in children {
-                builder = self.draw_node(child.value(), viewport_dimensions, builder);
+                builder = self.draw_node(child.value(), local_matrix, viewport_dimensions, builder);
             }
         }
 
@@ -353,12 +370,13 @@ impl GltfModel {
     ///
     /// - Panics if the mesh is out of range.
     ///
-    pub fn draw_mesh(&self, mesh_id: usize, viewport_dimensions: [u32; 2],
-                     mut builder: AutoCommandBufferBuilder) -> AutoCommandBufferBuilder
+    pub fn draw_mesh(&self, mesh_id: usize, world_to_framebuffer: Matrix4<f32>,
+                     viewport_dimensions: [u32; 2], mut builder: AutoCommandBufferBuilder)
+                     -> AutoCommandBufferBuilder
     {
         let instance_params = {
             let buf = self.instance_params_upload.next(vs::ty::InstanceParams {
-                world_to_framebuffer: [[0.003, 0.0, 0.0, 0.0], [0.0, 0.003, 0.0, 0.0], [0.0, 0.0, 0.003, 0.0], [0.0, 0.0, 0.0, 1.0]],
+                world_to_framebuffer: world_to_framebuffer.into(),
             });
             
             Arc::new(PersistentDescriptorSet::start(self.pipeline_layout.clone(), 0)

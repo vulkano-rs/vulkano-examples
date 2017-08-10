@@ -10,6 +10,7 @@
 
 // Welcome to the glTF example!
 
+extern crate cgmath;
 extern crate gltf;
 #[macro_use]
 extern crate vulkano;
