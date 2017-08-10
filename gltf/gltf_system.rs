@@ -48,6 +48,8 @@ use vulkano::pipeline::vertex::VertexDefinition;
 use vulkano::pipeline::vertex::VertexSource;
 use vulkano::pipeline::viewport::Viewport;
 use vulkano::sampler::Sampler;
+use vulkano::sync::GpuFuture;
+use vulkano::sync::now;
 
 use cgmath::Matrix4;
 use cgmath::SquareMatrix;
@@ -90,6 +92,10 @@ impl GltfModel {
     pub fn new<R>(gltf: gltf::gltf::Gltf, queue: Arc<Queue>, subpass: Subpass<R>) -> GltfModel
         where R: RenderPassAbstract + Clone + Send + Sync + 'static
     {
+        // This variable will be modified during the function, and will correspond to when the
+        // transfer commands are finished.
+        let mut final_future = Box::new(now(queue.device().clone())) as Box<GpuFuture>;
+
         // The first step is to go through all the glTF buffer definitions and load them as
         // `ImmutableBuffer`.
         let gltf_buffers: Vec<Arc<ImmutableBuffer<[u8]>>> = {
@@ -101,6 +107,8 @@ impl GltfModel {
                                             Some(queue.family()), queue.clone())
                                             .expect("Failed to create immutable buffer")
                 };
+
+                final_future = Box::new(final_future.join(future));
                 buffers.push(buf);
             }
             buffers
@@ -141,6 +149,7 @@ impl GltfModel {
                                             Some(queue.family()), queue.clone())
                                             .expect("Failed to create immutable image")
                 };
+                final_future = Box::new(final_future.join(future));
                 textures.push((img, sampler.clone()));
             }
             textures
@@ -288,6 +297,9 @@ impl GltfModel {
             }
             meshes
         };
+
+        // Before returning, we start all the transfers and wait until they are finished.
+        let _ = final_future.then_signal_fence_and_flush().unwrap().wait(None).unwrap();
 
         GltfModel {
             gltf: gltf,
