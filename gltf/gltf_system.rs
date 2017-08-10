@@ -678,7 +678,7 @@ impl RuntimeVertexDef {
                      gltf::json::accessor::Type::Vec3) => Format::R32G32B32Sfloat,
                     (gltf::json::accessor::ComponentType::F32,
                      gltf::json::accessor::Type::Vec4) => Format::R32G32B32A32Sfloat,
-                    v => unimplemented!()
+                    _ => unimplemented!()
                 },
             };
 
