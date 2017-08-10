@@ -167,7 +167,7 @@ fn main() {
                                vec![[0.0, 0.0, 1.0, 1.0].into()])
             .unwrap();
 
-        builder = model.draw(dimensions, builder);
+        builder = model.draw_default_scene(dimensions, builder);
 
         let command_buffer = builder.end_render_pass()
             .unwrap()

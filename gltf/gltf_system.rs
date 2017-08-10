@@ -55,6 +55,8 @@ use gltf;
 
 /// Represents a fully-loaded glTF model, ready to be drawn.
 pub struct GltfModel {
+    // The main glTF document.
+    gltf: gltf::gltf::Gltf,
     gltf_buffers: Vec<Arc<ImmutableBuffer<[u8]>>>,
     // Each mesh of the glTF scene is made of one or more primitives.
     gltf_meshes: Vec<Vec<PrimitiveInfo>>,
@@ -275,6 +277,7 @@ impl GltfModel {
         };
 
         GltfModel {
+            gltf: gltf,
             gltf_buffers: gltf_buffers,
             gltf_meshes: gltf_meshes,
         }
@@ -285,42 +288,94 @@ impl GltfModel {
     /// `viewport_dimensions` should be the dimensions of the framebuffer we're drawing to.
     ///
     /// The `builder` must be inside a subpass compatible with the one that was passed in `new`.
-    pub fn draw(&self, viewport_dimensions: [u32; 2], mut builder: AutoCommandBufferBuilder)
-                -> AutoCommandBufferBuilder
+    pub fn draw_default_scene(&self, viewport_dimensions: [u32; 2],
+                              builder: AutoCommandBufferBuilder) -> AutoCommandBufferBuilder
     {
-        for mesh in self.gltf_meshes.iter() {
-            for primitive in mesh.iter() {
-                let vertex_buffers = primitive.vertex_buffers.iter().map(|&(vb_id, offset)| {
-                    let buf = self.gltf_buffers[vb_id].clone();
-                    let buf_len = buf.len();
-                    Arc::new(buf.into_buffer_slice().slice(offset..buf_len).unwrap()) as Arc<_>
-                }).collect();
+        if let Some(ref scene) = self.gltf.as_json().scene {
+            self.draw_scene(scene.value(), viewport_dimensions, builder)
+        } else {
+            builder
+        }
+    }
 
-                let dynamic_state = DynamicState {
-                    viewports: Some(vec![Viewport {
-                        origin: [0.0, 0.0],
-                        dimensions: [viewport_dimensions[0] as f32, viewport_dimensions[1] as f32],
-                        depth_range: 0.0 .. 1.0,
-                    }]),
-                    .. DynamicState::none()
-                };
+    /// Draws a single scene.
+    ///
+    /// # Panic
+    ///
+    /// - Panics if the scene is out of range.
+    ///
+    pub fn draw_scene(&self, scene_id: usize, viewport_dimensions: [u32; 2],
+                      mut builder: AutoCommandBufferBuilder) -> AutoCommandBufferBuilder
+    {
+        for node in self.gltf.as_json().scenes[scene_id].nodes.iter() {
+            builder = self.draw_node(node.value(), viewport_dimensions, builder);
+        }
 
-                if let Some((buf_id, total_offset, num_indices)) = primitive.index_buffer {
-                    let ib = self.gltf_buffers[buf_id].clone();
-                    let ib_len = ib.len();
-                    let indices = ib.into_buffer_slice().slice(total_offset..ib_len).unwrap();
-                    let indices: BufferSlice<[u16], Arc<ImmutableBuffer<[u8]>>> = unsafe { ::std::mem::transmute(indices) };     // TODO: add a function in vulkano that does that
-                    let indices = indices.clone().slice(0..num_indices as usize).unwrap();
-                    builder = builder.draw_indexed(primitive.pipeline.clone(),
-                        dynamic_state,
-                        vertex_buffers, indices, primitive.material.clone(), ())
-                        .unwrap();
-                } else {
-                    builder = builder.draw(primitive.pipeline.clone(),
-                        dynamic_state,
-                        vertex_buffers, primitive.material.clone(), ())
-                        .unwrap();
-                }
+        builder
+    }
+
+    // Draws a single node.
+    //
+    // # Panic
+    //
+    // - Panics if the node is out of range.
+    //
+    fn draw_node(&self, node_id: usize, viewport_dimensions: [u32; 2],
+                 mut builder: AutoCommandBufferBuilder) -> AutoCommandBufferBuilder
+    {
+        if let Some(ref mesh) = self.gltf.as_json().nodes[node_id].mesh {
+            builder = self.draw_mesh(mesh.value(), viewport_dimensions, builder);
+        }
+
+        if let Some(ref children) = self.gltf.as_json().nodes[node_id].children {
+            for child in children {
+                builder = self.draw_node(child.value(), viewport_dimensions, builder);
+            }
+        }
+
+        builder
+    }
+
+    /// Draws a single mesh of the glTF document.
+    ///
+    /// # Panic
+    ///
+    /// - Panics if the mesh is out of range.
+    ///
+    pub fn draw_mesh(&self, mesh_id: usize, viewport_dimensions: [u32; 2],
+                     mut builder: AutoCommandBufferBuilder) -> AutoCommandBufferBuilder
+    {
+        for primitive in self.gltf_meshes[mesh_id].iter() {
+            let vertex_buffers = primitive.vertex_buffers.iter().map(|&(vb_id, offset)| {
+                let buf = self.gltf_buffers[vb_id].clone();
+                let buf_len = buf.len();
+                Arc::new(buf.into_buffer_slice().slice(offset..buf_len).unwrap()) as Arc<_>
+            }).collect();
+
+            let dynamic_state = DynamicState {
+                viewports: Some(vec![Viewport {
+                    origin: [0.0, 0.0],
+                    dimensions: [viewport_dimensions[0] as f32, viewport_dimensions[1] as f32],
+                    depth_range: 0.0 .. 1.0,
+                }]),
+                .. DynamicState::none()
+            };
+
+            if let Some((buf_id, total_offset, num_indices)) = primitive.index_buffer {
+                let ib = self.gltf_buffers[buf_id].clone();
+                let ib_len = ib.len();
+                let indices = ib.into_buffer_slice().slice(total_offset..ib_len).unwrap();
+                let indices: BufferSlice<[u16], Arc<ImmutableBuffer<[u8]>>> = unsafe { ::std::mem::transmute(indices) };     // TODO: add a function in vulkano that does that
+                let indices = indices.clone().slice(0..num_indices as usize).unwrap();
+                builder = builder.draw_indexed(primitive.pipeline.clone(),
+                    dynamic_state,
+                    vertex_buffers, indices, primitive.material.clone(), ())
+                    .unwrap();
+            } else {
+                builder = builder.draw(primitive.pipeline.clone(),
+                    dynamic_state,
+                    vertex_buffers, primitive.material.clone(), ())
+                    .unwrap();
             }
         }
 
