@@ -228,6 +228,11 @@ impl GltfModel {
         };
 
         let gltf_meshes = {
+            let vs = vs::Shader::load(queue.device().clone())
+                .expect("failed to create shader module");
+            let fs = fs::Shader::load(queue.device().clone())
+                .expect("failed to create shader module");
+
             let mut meshes = Vec::new();
             for (mesh_id, mesh) in gltf.as_json().meshes.iter().enumerate() {
                 let mut mesh_prim_out = Vec::with_capacity(mesh.primitives.len());
@@ -261,8 +266,6 @@ impl GltfModel {
                     // TODO: adjust some pipeline params based on material
 
                     let pipeline = {
-                        let vs = vs::Shader::load(queue.device().clone()).expect("failed to create shader module");
-                        let fs = fs::Shader::load(queue.device().clone()).expect("failed to create shader module");
                         Arc::new(GraphicsPipeline::start()
                             .vertex_input(runtime_def)
                             .vertex_shader(vs.main_entry_point(), ())
