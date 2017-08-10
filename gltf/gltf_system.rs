@@ -27,6 +27,7 @@ use vulkano::descriptor::descriptor::DescriptorDescTy;
 use vulkano::descriptor::descriptor::ShaderStages;
 use vulkano::descriptor::descriptor_set::DescriptorSet;
 use vulkano::descriptor::descriptor_set::PersistentDescriptorSet;
+use vulkano::descriptor::pipeline_layout::PipelineLayoutAbstract;
 use vulkano::descriptor::pipeline_layout::PipelineLayoutDesc;
 use vulkano::descriptor::pipeline_layout::PipelineLayoutDescNames;
 use vulkano::descriptor::pipeline_layout::PipelineLayoutDescPcRange;
@@ -60,6 +61,10 @@ pub struct GltfModel {
     gltf_buffers: Vec<Arc<ImmutableBuffer<[u8]>>>,
     // Each mesh of the glTF scene is made of one or more primitives.
     gltf_meshes: Vec<Vec<PrimitiveInfo>>,
+    // Buffer used to upload `InstanceParams` when drawing.
+    instance_params_upload: CpuBufferPool<vs::ty::InstanceParams>,
+    // Pipeline layout common to all the graphics pipeline of all the primitives.
+    pipeline_layout: Arc<PipelineLayoutAbstract + Send + Sync>,
 }
 
 // Information about a primitive.
@@ -137,11 +142,13 @@ impl GltfModel {
             }
             textures
         };
+        
+        let pipeline_layout = Arc::new(MyPipelineLayout.build(queue.device().clone()).unwrap());
 
         let gltf_materials: Vec<Arc<DescriptorSet + Send + Sync>> = {
+            // TODO: meh, we want some device-local thing here
             let params_buffer = CpuBufferPool::new(queue.device().clone(), BufferUsage::uniform_buffer(),
                                                     Some(queue.family()));
-            let pipeline_layout = Arc::new(MyPipelineLayout.build(queue.device().clone()).unwrap());
 
             let dummy_sampler = Sampler::simple_repeat_linear(queue.device().clone());
             let (dummy_texture, _) = 
@@ -196,7 +203,7 @@ impl GltfModel {
                     .unwrap_or((dummy_texture.clone(), dummy_sampler.clone()));
 
                 let descriptor_set = 
-                    Arc::new(PersistentDescriptorSet::start(pipeline_layout.clone(), 0)
+                    Arc::new(PersistentDescriptorSet::start(pipeline_layout.clone(), 1)
                         .add_buffer(material_params)
                         .unwrap()
                         .add_sampled_image(base_color.0, base_color.1)
@@ -280,6 +287,10 @@ impl GltfModel {
             gltf: gltf,
             gltf_buffers: gltf_buffers,
             gltf_meshes: gltf_meshes,
+            instance_params_upload: CpuBufferPool::new(queue.device().clone(),
+                                                       BufferUsage::uniform_buffer(),
+                                                       Some(queue.family())),
+            pipeline_layout: pipeline_layout,
         }
     }
 
@@ -345,6 +356,18 @@ impl GltfModel {
     pub fn draw_mesh(&self, mesh_id: usize, viewport_dimensions: [u32; 2],
                      mut builder: AutoCommandBufferBuilder) -> AutoCommandBufferBuilder
     {
+        let instance_params = {
+            let buf = self.instance_params_upload.next(vs::ty::InstanceParams {
+                world_to_framebuffer: [[0.003, 0.0, 0.0, 0.0], [0.0, 0.003, 0.0, 0.0], [0.0, 0.0, 0.003, 0.0], [0.0, 0.0, 0.0, 1.0]],
+            });
+            
+            Arc::new(PersistentDescriptorSet::start(self.pipeline_layout.clone(), 0)
+                .add_buffer(buf)
+                .unwrap()
+                .build()
+                .unwrap())
+        };
+
         for primitive in self.gltf_meshes[mesh_id].iter() {
             let vertex_buffers = primitive.vertex_buffers.iter().map(|&(vb_id, offset)| {
                 let buf = self.gltf_buffers[vb_id].clone();
@@ -369,12 +392,12 @@ impl GltfModel {
                 let indices = indices.clone().slice(0..num_indices as usize).unwrap();
                 builder = builder.draw_indexed(primitive.pipeline.clone(),
                     dynamic_state,
-                    vertex_buffers, indices, primitive.material.clone(), ())
+                    vertex_buffers, indices, (instance_params.clone(), primitive.material.clone()), ())
                     .unwrap();
             } else {
                 builder = builder.draw(primitive.pipeline.clone(),
                     dynamic_state,
-                    vertex_buffers, primitive.material.clone(), ())
+                    vertex_buffers, (instance_params.clone(), primitive.material.clone()), ())
                     .unwrap();
             }
         }
@@ -385,44 +408,49 @@ impl GltfModel {
 
 mod vs {
     #[derive(VulkanoShader)]
+    #[allow(dead_code)]
     #[ty = "vertex"]
     #[src = "
-    #version 450
+#version 450
 
-    layout(location = 0) in vec3 i_position;
-    layout(location = 1) in vec3 i_normal;
-    layout(location = 2) in vec4 i_tangent;
-    layout(location = 3) in vec2 i_texcoord_0;
-    layout(location = 4) in vec2 i_texcoord_1;
-    layout(location = 5) in vec4 i_color_0;
-    layout(location = 6) in vec4 i_joints_0;
-    layout(location = 7) in vec4 i_weights_0;
+layout(set = 0, binding = 0) uniform InstanceParams {
+    mat4 world_to_framebuffer;
+} u_instance_params;
 
-    layout(location = 0) out vec3 v_position;
-    layout(location = 1) out vec3 v_normal;
-    layout(location = 2) out vec2 v_texcoord_0;
-    layout(location = 3) out vec2 v_texcoord_1;
+layout(location = 0) in vec3 i_position;
+layout(location = 1) in vec3 i_normal;
+layout(location = 2) in vec4 i_tangent;
+layout(location = 3) in vec2 i_texcoord_0;
+layout(location = 4) in vec2 i_texcoord_1;
+layout(location = 5) in vec4 i_color_0;
+layout(location = 6) in vec4 i_joints_0;
+layout(location = 7) in vec4 i_weights_0;
 
-    void main() {
-        v_position = i_position;
-        v_normal = i_normal;
-        v_texcoord_0 = i_texcoord_0;
-        v_texcoord_1 = i_texcoord_1;
+layout(location = 0) out vec3 v_position;
+layout(location = 1) out vec3 v_normal;
+layout(location = 2) out vec2 v_texcoord_0;
+layout(location = 3) out vec2 v_texcoord_1;
 
-        gl_Position = vec4(i_position, 1.0);
-        gl_Position.xyz /= 300.0;
-    }
+void main() {
+    v_position = i_position;
+    v_normal = i_normal;
+    v_texcoord_0 = i_texcoord_0;
+    v_texcoord_1 = i_texcoord_1;
+
+    gl_Position = u_instance_params.world_to_framebuffer * vec4(i_position, 1.0);
+}
 "]
     struct Dummy;
 }
 
 mod fs {
     #[derive(VulkanoShader)]
+    #[allow(dead_code)]
     #[ty = "fragment"]
     #[src = "
 #version 450
 
-layout(set = 0, binding = 0) uniform MaterialParams {
+layout(set = 1, binding = 0) uniform MaterialParams {
     vec4 base_color_factor;
     int base_color_texture_tex_coord;
     float metallic_factor;
@@ -436,11 +464,11 @@ layout(set = 0, binding = 0) uniform MaterialParams {
     vec3 emissive_factor;
 } u_material_params;
 
-layout(set = 0, binding = 1) uniform sampler2D u_base_color;
-layout(set = 0, binding = 2) uniform sampler2D u_metallic_roughness;
-layout(set = 0, binding = 3) uniform sampler2D u_normal_texture;
-layout(set = 0, binding = 4) uniform sampler2D u_occlusion_texture;
-layout(set = 0, binding = 5) uniform sampler2D u_emissive_texture;
+layout(set = 1, binding = 1) uniform sampler2D u_base_color;
+layout(set = 1, binding = 2) uniform sampler2D u_metallic_roughness;
+layout(set = 1, binding = 3) uniform sampler2D u_normal_texture;
+layout(set = 1, binding = 4) uniform sampler2D u_occlusion_texture;
+layout(set = 1, binding = 5) uniform sampler2D u_emissive_texture;
 
 layout(location = 0) in vec3 v_position;
 layout(location = 1) in vec3 v_normal;
@@ -689,9 +717,9 @@ unsafe impl VertexSource<Vec<Arc<BufferAccess + Send + Sync>>> for RuntimeVertex
 struct MyPipelineLayout;
 
 unsafe impl PipelineLayoutDesc for MyPipelineLayout {
-    fn num_sets(&self) -> usize { 1 }
+    fn num_sets(&self) -> usize { 2 }
     fn num_bindings_in_set(&self, set: usize) -> Option<usize> {
-        match set { 0 => Some(6), _ => None, }
+        match set { 0 => Some(1), 1 => Some(6), _ => None, }
     }
     fn descriptor(&self, set: usize, binding: usize)
         -> Option<DescriptorDesc> {
@@ -705,9 +733,20 @@ unsafe impl PipelineLayoutDesc for MyPipelineLayout {
                                                                                     content:
                                                                                         DescriptorBufferContentDesc::F32,}),
                                 array_count: 1,
+                                stages: ShaderStages { vertex: true, .. ShaderStages::none() },
+                                readonly: true,}),
+            (1, 0) =>
+            Some(DescriptorDesc{ty:
+                                    DescriptorDescTy::Buffer(DescriptorBufferDesc{dynamic:
+                                                                                        Some(false),
+                                                                                    storage:
+                                                                                        false,
+                                                                                    content:
+                                                                                        DescriptorBufferContentDesc::F32,}),
+                                array_count: 1,
                                 stages: ShaderStages { fragment: true, .. ShaderStages::none() },
                                 readonly: true,}),
-            (0, 1) =>
+            (1, 1) =>
             Some(DescriptorDesc{ty:
                                     DescriptorDescTy::CombinedImageSampler(DescriptorImageDesc{sampled:
                                                                                                     true,
@@ -722,7 +761,7 @@ unsafe impl PipelineLayoutDesc for MyPipelineLayout {
                                 array_count: 1,
                                 stages: ShaderStages { fragment: true, .. ShaderStages::none() },
                                 readonly: true,}),
-            (0, 2) =>
+            (1, 2) =>
             Some(DescriptorDesc{ty:
                                     DescriptorDescTy::CombinedImageSampler(DescriptorImageDesc{sampled:
                                                                                                     true,
@@ -737,7 +776,7 @@ unsafe impl PipelineLayoutDesc for MyPipelineLayout {
                                 array_count: 1,
                                 stages: ShaderStages { fragment: true, .. ShaderStages::none() },
                                 readonly: true,}),
-            (0, 3) =>
+            (1, 3) =>
             Some(DescriptorDesc{ty:
                                     DescriptorDescTy::CombinedImageSampler(DescriptorImageDesc{sampled:
                                                                                                     true,
@@ -752,7 +791,7 @@ unsafe impl PipelineLayoutDesc for MyPipelineLayout {
                                 array_count: 1,
                                 stages: ShaderStages { fragment: true, .. ShaderStages::none() },
                                 readonly: true,}),
-            (0, 4) =>
+            (1, 4) =>
             Some(DescriptorDesc{ty:
                                     DescriptorDescTy::CombinedImageSampler(DescriptorImageDesc{sampled:
                                                                                                     true,
@@ -767,7 +806,7 @@ unsafe impl PipelineLayoutDesc for MyPipelineLayout {
                                 array_count: 1,
                                 stages: ShaderStages { fragment: true, .. ShaderStages::none() },
                                 readonly: true,}),
-            (0, 5) =>
+            (1, 5) =>
             Some(DescriptorDesc{ty:
                                     DescriptorDescTy::CombinedImageSampler(DescriptorImageDesc{sampled:
                                                                                                     true,
