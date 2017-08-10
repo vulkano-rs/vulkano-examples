@@ -9,6 +9,9 @@
 
 
 // Welcome to the glTF example!
+//
+// This file contains the `main` function that creates the window and performs the drawing, but
+// the interesting part is in the `gltf_system` module.
 
 extern crate cgmath;
 extern crate gltf;
@@ -82,34 +85,23 @@ fn main() {
                        None).expect("failed to create swapchain")
     };
 
-    //
     let render_pass = Arc::new(single_pass_renderpass!(device.clone(),
         attachments: {
-            // `color` is a custom name we give to the first and only attachment.
             color: {
-                // `load: Clear` means that we ask the GPU to clear the content of this
-                // attachment at the start of the drawing.
                 load: Clear,
-                // `store: Store` means that we ask the GPU to store the output of the draw
-                // in the actual image. We could also ask it to discard the result.
                 store: Store,
-                // `format: <ty>` indicates the type of the format of the image. This has to
-                // be one of the types of the `vulkano::format` module (or alternatively one
-                // of your structs that implements the `FormatDesc` trait). Here we use the
-                // generic `vulkano::format::Format` enum because we don't know the format in
-                // advance.
                 format: swapchain.format(),
-                // TODO:
                 samples: 1,
             }
         },
         pass: {
-            // We use the attachment named `color` as the one and only color attachment.
             color: [color],
-            // No depth-stencil attachment is indicated with empty brackets.
             depth_stencil: {}
         }
     ).unwrap());
+
+
+    // This is where the glTF-specific code starts.
 
     // Try loading our glTF model.
     let gltf = {
@@ -119,7 +111,9 @@ fn main() {
         import.sync().expect("Error while loading glTF file")
     };
 
-    let model = gltf_system::GltfModel::new(gltf, queue.clone(), Subpass::from(render_pass.clone(), 0).unwrap());
+    // Upload everything to get ready for drawing.
+    let model = gltf_system::GltfModel::new(gltf, queue.clone(),
+                                            Subpass::from(render_pass.clone(), 0).unwrap());
 
 
     let mut recreate_swapchain = false;
