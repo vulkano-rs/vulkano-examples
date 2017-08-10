@@ -53,19 +53,30 @@ use std::vec::IntoIter as VecIntoIter;
 
 use gltf;
 
+/// Represents a fully-loaded glTF model, ready to be drawn.
 pub struct GltfModel {
     gltf_buffers: Vec<Arc<ImmutableBuffer<[u8]>>>,
+    // Each mesh of the glTF scene is made of one or more primitives.
     gltf_meshes: Vec<Vec<PrimitiveInfo>>,
 }
 
+// Information about a primitive.
 struct PrimitiveInfo {
+    // The graphics pipeline used to draw the primitive.
     pipeline: Arc<GraphicsPipelineAbstract + Send + Sync>,
     vertex_buffers: Vec<(usize, usize)>,
     index_buffer: Option<(usize, usize, u32)>,
+    // Descriptor set to bind to slot #0 when drawing.
     material: Arc<DescriptorSet + Send + Sync>,
 }
 
 impl GltfModel {
+    /// Loads all the resources necessary to draw `gltf`.
+    ///
+    /// The `queue` parameter is the queue that will be used to submit data transfer commands as
+    /// part of the loading.
+    ///
+    /// The `subpass` parameter is the render pass subpass that we will need to be in when drawing.
     pub fn new<R>(gltf: gltf::gltf::Gltf, queue: Arc<Queue>, subpass: Subpass<R>) -> GltfModel
         where R: RenderPassAbstract + Clone + Send + Sync + 'static
     {
@@ -126,7 +137,7 @@ impl GltfModel {
         };
 
         let gltf_materials: Vec<Arc<DescriptorSet + Send + Sync>> = {
-            let mut params_buffer = CpuBufferPool::new(queue.device().clone(), BufferUsage::uniform_buffer(),
+            let params_buffer = CpuBufferPool::new(queue.device().clone(), BufferUsage::uniform_buffer(),
                                                     Some(queue.family()));
             let pipeline_layout = Arc::new(MyPipelineLayout.build(queue.device().clone()).unwrap());
 
@@ -269,6 +280,11 @@ impl GltfModel {
         }
     }
 
+    /// Draws the glTF scene by adding commands to `builder`.
+    ///
+    /// `viewport_dimensions` should be the dimensions of the framebuffer we're drawing to.
+    ///
+    /// The `builder` must be inside a subpass compatible with the one that was passed in `new`.
     pub fn draw(&self, viewport_dimensions: [u32; 2], mut builder: AutoCommandBufferBuilder)
                 -> AutoCommandBufferBuilder
     {
