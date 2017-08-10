@@ -155,14 +155,23 @@ impl GltfModel {
             }
             textures
         };
-        
+
+        // Usually in vulkano we build a graphics pipeline first, and build descriptor sets that
+        // are based on it.
+        // However in this situation it is more convenient to build the *pipeline layout object*
+        // ahead of time. This object is normally automatically built by vulkano at the same time
+        // as the graphics pipeline, but here we create it immediately and will pass it when
+        // building the pipelines.
         let pipeline_layout = Arc::new(MyPipelineLayout.build(queue.device().clone()).unwrap());
 
+        // We are going to build a descriptor set for each material defined in the glTF file.
         let gltf_materials: Vec<Arc<DescriptorSet + Send + Sync>> = {
             // TODO: meh, we want some device-local thing here
             let params_buffer = CpuBufferPool::new(queue.device().clone(), BufferUsage::uniform_buffer(),
                                                     Some(queue.family()));
 
+            // Vulkano doesn't allow us to bind *nothing* in a descriptor, so we create a dummy
+            // texture and a dummy sampler to use when a texture or a sampler is missing.
             let dummy_sampler = Sampler::simple_repeat_linear(queue.device().clone());
             let (dummy_texture, _) = 
                     ImmutableImage::from_iter([0u8].iter().cloned(),
@@ -172,6 +181,8 @@ impl GltfModel {
 
             let mut materials = Vec::new();
             for material in gltf.as_json().materials.iter() {
+                // Create a buffer that stores some basic parameter values.
+                // These fields are the same as the one found in the shader's source code.
                 let material_params = params_buffer.next(fs::ty::MaterialParams {
                     base_color_factor: material.pbr_metallic_roughness.as_ref()
                                     .map(|t| t.base_color_factor.0).unwrap_or([1.0, 1.0, 1.0, 1.0]),
@@ -197,6 +208,7 @@ impl GltfModel {
                     _dummy0: [0; 12],
                 });
 
+                // Create the textures and samplers based on the glTF definition.
                 let base_color = material.pbr_metallic_roughness.as_ref()
                     .and_then(|t| t.base_color_texture.as_ref())
                     .map(|t| gltf_textures[t.index.value()].clone())
@@ -215,6 +227,7 @@ impl GltfModel {
                     .map(|t| gltf_textures[t.index.value()].clone())
                     .unwrap_or((dummy_texture.clone(), dummy_sampler.clone()));
 
+                // Building the descriptor set with all the things we built above.
                 let descriptor_set = 
                     Arc::new(PersistentDescriptorSet::start(pipeline_layout.clone(), 1)
                         .add_buffer(material_params)
@@ -237,6 +250,8 @@ impl GltfModel {
             materials
         };
 
+        // Each glTF mesh is made of one of more primitives.
+        // In this loader, each primitive has its own graphics pipeline.
         let gltf_meshes = {
             let vs = vs::Shader::load(queue.device().clone())
                 .expect("failed to create shader module");
@@ -247,14 +262,25 @@ impl GltfModel {
             for (mesh_id, mesh) in gltf.as_json().meshes.iter().enumerate() {
                 let mut mesh_prim_out = Vec::with_capacity(mesh.primitives.len());
                 for (primitive_id, primitive) in mesh.primitives.iter().enumerate() {
+                    // We build a `RuntimeVertexDef` that analyzes the primitive definition and
+                    // builds the link between the vertex shader input and the glTF vertex buffers.
                     let runtime_def = RuntimeVertexDef::from_primitive(gltf.as_json(), mesh_id, primitive_id);
 
-                    let vertex_buffers = runtime_def.vertex_buffer_ids().iter().map(|&(buf_id, offset)| {
-                        let buf = gltf_buffers[buf_id].clone();
-                        let buf_len = buf.len();
-                        Arc::new(buf.into_buffer_slice().slice(offset..buf_len).unwrap()) as Arc<_>
-                    }).collect();
+                    // This `runtime_def` generates the list of vertex buffers that must be bound
+                    // when drawing, as a list of glTF buffer ids and their offsets.
+                    // From this information we generate a `vertex_buffer` variable that we will
+                    // later be able to directly pass to the `draw()` function.
+                    let vertex_buffers = runtime_def.vertex_buffer_ids().iter()
+                        .map(|&(buf_id, offset)| {
+                            let buf = gltf_buffers[buf_id].clone();
+                            let buf_len = buf.len();
+                            let slice = buf.into_buffer_slice().slice(offset..buf_len).unwrap();
+                            Arc::new(slice) as Arc<_>   // TODO: meh for Arc'ing that
+                        }).collect();
 
+                    // Similarly, if the primitive indicates that it uses an index buffer we
+                    // immediately generate an `index_buffer` variable which we will later be
+                    // able to pass to `draw_indexed`.
                     let index_buffer = if let Some(indices) = primitive.indices.as_ref().map(|i| i.value()) {
                         let accessor = &gltf.as_json().accessors[indices];
                         let view = &gltf.as_json().buffer_views[accessor.buffer_view.value()];
@@ -262,6 +288,7 @@ impl GltfModel {
                         let index_buffer = gltf_buffers[view.buffer.value()].clone();
                         let index_buffer_len = index_buffer.len();
                         let indices = index_buffer.into_buffer_slice().slice(total_offset..index_buffer_len).unwrap();
+                        // TODO: it is not guaranteed to be u16
                         let indices: BufferSlice<[u16], Arc<ImmutableBuffer<[u8]>>> = unsafe { ::std::mem::transmute(indices) };     // TODO: add a function in vulkano that does that
                         let indices = indices.clone().slice(0..accessor.count as usize).unwrap();
                         Some(indices)
@@ -269,7 +296,7 @@ impl GltfModel {
                         None
                     };
 
-
+                    // Determine the kind of primitives based on the glTF definition.
                     let primitive_topology = match primitive.mode.clone().unwrap() {
                         gltf::json::mesh::Mode::Points => PrimitiveTopology::PointList,
                         gltf::json::mesh::Mode::Lines => PrimitiveTopology::LineList,
@@ -283,18 +310,18 @@ impl GltfModel {
                     let material_id = primitive.material.as_ref().expect("Default material not supported").value();
 
                     // TODO: adjust some pipeline params based on material
+                    // TODO: pass pipeline_layout to the builder
 
-                    let pipeline = {
-                        Arc::new(GraphicsPipeline::start()
-                            .vertex_input(runtime_def)
-                            .vertex_shader(vs.main_entry_point(), ())
-                            .primitive_topology(primitive_topology)
-                            .viewports_dynamic_scissors_irrelevant(1)
-                            .fragment_shader(fs.main_entry_point(), ())
-                            .render_pass(subpass.clone())
-                            .build(queue.device().clone())
-                            .unwrap())
-                    };
+                    // Now building the graphics pipeline of this primitive.
+                    let pipeline = Arc::new(GraphicsPipeline::start()
+                        .vertex_input(runtime_def)
+                        .vertex_shader(vs.main_entry_point(), ())
+                        .primitive_topology(primitive_topology)
+                        .viewports_dynamic_scissors_irrelevant(1)
+                        .fragment_shader(fs.main_entry_point(), ())
+                        .render_pass(subpass.clone())
+                        .build(queue.device().clone())
+                        .unwrap());
 
                     mesh_prim_out.push(PrimitiveInfo {
                         pipeline: pipeline as Arc<_>,
@@ -308,7 +335,7 @@ impl GltfModel {
             meshes
         };
 
-        // Before returning, we start all the transfers and wait until they are finished.
+        // Before returning, we start all the pending transfers and wait until they are finished.
         let _ = final_future.then_signal_fence_and_flush().unwrap().wait(None).unwrap();
 
         GltfModel {
