@@ -63,7 +63,6 @@ use gltf;
 pub struct GltfModel {
     // The main glTF document.
     gltf: gltf::gltf::Gltf,
-    gltf_buffers: Vec<Arc<ImmutableBuffer<[u8]>>>,
     // Each mesh of the glTF scene is made of one or more primitives.
     gltf_meshes: Vec<Vec<PrimitiveInfo>>,
     // Buffer used to upload `InstanceParams` when drawing.
@@ -76,8 +75,10 @@ pub struct GltfModel {
 struct PrimitiveInfo {
     // The graphics pipeline used to draw the primitive.
     pipeline: Arc<GraphicsPipelineAbstract + Send + Sync>,
-    vertex_buffers: Vec<(usize, usize)>,
-    index_buffer: Option<(usize, usize, u32)>,
+    // List of vertex buffers to bind when drawing.
+    vertex_buffers: Vec<Arc<BufferAccess + Sync + Send>>,
+    // If `Some`, contains the buffer that contains the indices of the primitive.
+    index_buffer: Option<BufferSlice<[u16], Arc<ImmutableBuffer<[u8]>>>>,
     // Descriptor set to bind to slot #0 when drawing.
     material: Arc<DescriptorSet + Send + Sync>,
 }
@@ -247,18 +248,27 @@ impl GltfModel {
                 let mut mesh_prim_out = Vec::with_capacity(mesh.primitives.len());
                 for (primitive_id, primitive) in mesh.primitives.iter().enumerate() {
                     let runtime_def = RuntimeVertexDef::from_primitive(gltf.as_json(), mesh_id, primitive_id);
-                    let vertex_buffer_ids = runtime_def.vertex_buffer_ids().to_owned();
+
+                    let vertex_buffers = runtime_def.vertex_buffer_ids().iter().map(|&(buf_id, offset)| {
+                        let buf = gltf_buffers[buf_id].clone();
+                        let buf_len = buf.len();
+                        Arc::new(buf.into_buffer_slice().slice(offset..buf_len).unwrap()) as Arc<_>
+                    }).collect();
 
                     let index_buffer = if let Some(indices) = primitive.indices.as_ref().map(|i| i.value()) {
                         let accessor = &gltf.as_json().accessors[indices];
                         let view = &gltf.as_json().buffer_views[accessor.buffer_view.value()];
                         let total_offset = accessor.byte_offset as usize + view.byte_offset as usize;
-                        let num_indices = accessor.count;
-                        let buf = view.buffer.value();
-                        Some((buf, total_offset, num_indices))
+                        let index_buffer = gltf_buffers[view.buffer.value()].clone();
+                        let index_buffer_len = index_buffer.len();
+                        let indices = index_buffer.into_buffer_slice().slice(total_offset..index_buffer_len).unwrap();
+                        let indices: BufferSlice<[u16], Arc<ImmutableBuffer<[u8]>>> = unsafe { ::std::mem::transmute(indices) };     // TODO: add a function in vulkano that does that
+                        let indices = indices.clone().slice(0..accessor.count as usize).unwrap();
+                        Some(indices)
                     } else {
                         None
                     };
+
 
                     let primitive_topology = match primitive.mode.clone().unwrap() {
                         gltf::json::mesh::Mode::Points => PrimitiveTopology::PointList,
@@ -288,7 +298,7 @@ impl GltfModel {
 
                     mesh_prim_out.push(PrimitiveInfo {
                         pipeline: pipeline as Arc<_>,
-                        vertex_buffers: vertex_buffer_ids,
+                        vertex_buffers: vertex_buffers,
                         index_buffer: index_buffer,
                         material: gltf_materials[material_id].clone(),
                     });
@@ -303,7 +313,6 @@ impl GltfModel {
 
         GltfModel {
             gltf: gltf,
-            gltf_buffers: gltf_buffers,
             gltf_meshes: gltf_meshes,
             instance_params_upload: CpuBufferPool::new(queue.device().clone(),
                                                        BufferUsage::uniform_buffer(),
@@ -402,12 +411,6 @@ impl GltfModel {
         };
 
         for primitive in self.gltf_meshes[mesh_id].iter() {
-            let vertex_buffers = primitive.vertex_buffers.iter().map(|&(vb_id, offset)| {
-                let buf = self.gltf_buffers[vb_id].clone();
-                let buf_len = buf.len();
-                Arc::new(buf.into_buffer_slice().slice(offset..buf_len).unwrap()) as Arc<_>
-            }).collect();
-
             let dynamic_state = DynamicState {
                 viewports: Some(vec![Viewport {
                     origin: [0.0, 0.0],
@@ -417,20 +420,17 @@ impl GltfModel {
                 .. DynamicState::none()
             };
 
-            if let Some((buf_id, total_offset, num_indices)) = primitive.index_buffer {
-                let ib = self.gltf_buffers[buf_id].clone();
-                let ib_len = ib.len();
-                let indices = ib.into_buffer_slice().slice(total_offset..ib_len).unwrap();
-                let indices: BufferSlice<[u16], Arc<ImmutableBuffer<[u8]>>> = unsafe { ::std::mem::transmute(indices) };     // TODO: add a function in vulkano that does that
-                let indices = indices.clone().slice(0..num_indices as usize).unwrap();
+            if let Some(ref indices) = primitive.index_buffer {
                 builder = builder.draw_indexed(primitive.pipeline.clone(),
                     dynamic_state,
-                    vertex_buffers, indices, (instance_params.clone(), primitive.material.clone()), ())
+                    primitive.vertex_buffers.clone(),
+                    indices.clone(), (instance_params.clone(), primitive.material.clone()), ())
                     .unwrap();
             } else {
                 builder = builder.draw(primitive.pipeline.clone(),
                     dynamic_state,
-                    vertex_buffers, (instance_params.clone(), primitive.material.clone()), ())
+                    primitive.vertex_buffers.clone(),
+                    (instance_params.clone(), primitive.material.clone()), ())
                     .unwrap();
             }
         }
