@@ -26,6 +26,7 @@ use vulkano::pipeline::viewport::Viewport;
 
 use std::sync::Arc;
 
+/// Allows applying an ambient lighting to a scene.
 pub struct AmbientLightingSystem {
     gfx_queue: Arc<Queue>,
     vertex_buffer: Arc<CpuAccessibleBuffer<[Vertex]>>,
@@ -84,7 +85,18 @@ impl AmbientLightingSystem {
         }
     }
 
-    /// Builds a secondary command buffer that draws the triangle on the current subpass.
+    /// Builds a secondary command buffer that applies ambient lighting.
+    ///
+    /// This secondary command buffer will read `color_input`, multiply it with `ambient_color`
+    /// and write the output to the current framebuffer with additive blending (in other words
+    /// the value will be added to the existing value in the framebuffer, and not replace the
+    /// existing value).
+    ///
+    /// - `viewport_dimensions` contains the dimensions of the current framebuffer.
+    /// - `color_input` is an image containing the albedo of each object of the scene. It is the
+    ///   result of the deferred pass.
+    /// - `ambient_color` is the color to apply.
+    ///
     pub fn draw<C>(&self, viewport_dimensions: [u32; 2], color_input: C,
                    ambient_color: [f32; 3]) -> AutoCommandBuffer
         where C: ImageViewAccess + Send + Sync + 'static,
@@ -153,15 +165,18 @@ mod fs {
     #[src = "
 #version 450
 
+// The `color_input` parameter of the `draw` method.
 layout(input_attachment_index = 0, set = 0, binding = 0) uniform subpassInput u_diffuse;
 
 layout(push_constant) uniform PushConstants {
+    // The `ambient_color` parameter of the `draw` method.
     vec4 color;
 } push_constants;
 
 layout(location = 0) out vec4 f_color;
 
 void main() {
+    // Load the value at the current pixel.
     vec3 in_diffuse = subpassLoad(u_diffuse).rgb;
     f_color.rgb = push_constants.color.rgb * in_diffuse;
     f_color.a = 1.0;

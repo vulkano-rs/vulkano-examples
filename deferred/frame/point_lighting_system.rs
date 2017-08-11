@@ -86,7 +86,34 @@ impl PointLightingSystem {
         }
     }
 
-    /// Builds a secondary command buffer that draws the triangle on the current subpass.
+    /// Builds a secondary command buffer that applies a point lighting.
+    ///
+    /// This secondary command buffer will read `depth_input` and rebuild the world position of the
+    /// pixel currently being processed (modulo rounding errors). It will then compare this
+    /// position with `position`, and process the lighting based on the distance and orientation
+    /// (similar to the directional lighting system).
+    ///
+    /// It then writes the output to the current framebuffer with additive blending (in other words
+    /// the value will be added to the existing value in the framebuffer, and not replace the
+    /// existing value).
+    ///
+    /// Note that in a real-world application, you probably want to pass additional parameters
+    /// such as some way to indicate the distance at which the lighting decrease. In this example
+    /// this value is hardcoded in the shader.
+    ///
+    /// - `viewport_dimensions` contains the dimensions of the current framebuffer.
+    /// - `color_input` is an image containing the albedo of each object of the scene. It is the
+    ///   result of the deferred pass.
+    /// - `normals_input` is an image containing the normals of each object of the scene. It is the
+    ///   result of the deferred pass.
+    /// - `depth_input` is an image containing the depth value of each pixel of the scene. It is
+    ///   the result of the deferred pass.
+    /// - `screen_to_world` is a matrix that turns coordinates from framebuffer space into world
+    ///   space. This matrix is used alongside with `depth_input` to determine the world
+    ///   coorindates of each pixel being processed.
+    /// - `position` is the position of the spot light in world coordinates.
+    /// - `color` is the color of the light.
+    ///
     pub fn draw<C, N, D>(&self, viewport_dimensions: [u32; 2], color_input: C, normals_input: N,
                          depth_input: D, screen_to_world: Matrix4<f32>, position: Vector3<f32>,
                          color: [f32; 3]) -> AutoCommandBuffer
@@ -166,13 +193,19 @@ mod fs {
     #[src = "
 #version 450
 
+// The `color_input` parameter of the `draw` method.
 layout(input_attachment_index = 0, set = 0, binding = 0) uniform subpassInput u_diffuse;
+// The `normals_input` parameter of the `draw` method.
 layout(input_attachment_index = 1, set = 0, binding = 1) uniform subpassInput u_normals;
+// The `depth_input` parameter of the `draw` method.
 layout(input_attachment_index = 2, set = 0, binding = 2) uniform subpassInput u_depth;
 
 layout(push_constant) uniform PushConstants {
+    // The `screen_to_world` parameter of the `draw` method.
     mat4 screen_to_world;
+    // The `color` parameter of the `draw` method.
     vec4 color;
+    // The `position` parameter of the `draw` method.
     vec4 position;
 } push_constants;
 
@@ -181,17 +214,23 @@ layout(location = 0) out vec4 f_color;
 
 void main() {
     float in_depth = subpassLoad(u_depth).x;
+    // Any depth superior or equal to 1.0 means that the pixel has been untouched by the deferred
+    // pass. We don't want to deal with them.
     if (in_depth >= 1.0) {
         discard;
     }
+    // Find the world coordinates of the current pixel.
     vec4 world = push_constants.screen_to_world * vec4(v_screen_coords, in_depth, 1.0);
     world /= world.w;
 
     vec3 in_normal = normalize(subpassLoad(u_normals).rgb);
     vec3 light_direction = normalize(push_constants.position.xyz - world.xyz);
+    // Calculate the percent of lighting that is received based on the orientation of the normal
+    // and the direction of the light.
     float light_percent = max(-dot(light_direction, in_normal), 0.0);
 
     float light_distance = length(push_constants.position.xyz - world.xyz);
+    // Further decrease light_percent based on the distance with the light position.
     light_percent *= 1.0 / exp(light_distance);
 
     vec3 in_diffuse = subpassLoad(u_diffuse).rgb;

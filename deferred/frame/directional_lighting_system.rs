@@ -27,6 +27,7 @@ use cgmath::Vector3;
 
 use std::sync::Arc;
 
+/// Allows applying a directional ligh source to a scene.
 pub struct DirectionalLightingSystem {
     gfx_queue: Arc<Queue>,
     vertex_buffer: Arc<CpuAccessibleBuffer<[Vertex]>>,
@@ -85,7 +86,25 @@ impl DirectionalLightingSystem {
         }
     }
 
-    /// Builds a secondary command buffer that draws the triangle on the current subpass.
+    /// Builds a secondary command buffer that applies directional lighting.
+    ///
+    /// This secondary command buffer will read `color_input` and `normals_input`, and multiply the
+    /// color with `color` and the dot product of the `direction` with the normal.
+    /// It then writes the output to the current framebuffer with additive blending (in other words
+    /// the value will be added to the existing value in the framebuffer, and not replace the
+    /// existing value).
+    ///
+    /// Since `normals_input` contains normals in world coordinates, `direction` should also be in
+    /// world coordinates.
+    ///
+    /// - `viewport_dimensions` contains the dimensions of the current framebuffer.
+    /// - `color_input` is an image containing the albedo of each object of the scene. It is the
+    ///   result of the deferred pass.
+    /// - `normals_input` is an image containing the normals of each object of the scene. It is the
+    ///   result of the deferred pass.
+    /// - `direction` is the direction of the light in world coordinates.
+    /// - `color` is the color to apply.
+    ///
     pub fn draw<C, N>(&self, viewport_dimensions: [u32; 2], color_input: C, normals_input: N,
                       direction: Vector3<f32>, color: [f32; 3]) -> AutoCommandBuffer
         where C: ImageViewAccess + Send + Sync + 'static,
@@ -158,11 +177,15 @@ mod fs {
     #[src = "
 #version 450
 
+// The `color_input` parameter of the `draw` method.
 layout(input_attachment_index = 0, set = 0, binding = 0) uniform subpassInput u_diffuse;
+// The `normals_input` parameter of the `draw` method.
 layout(input_attachment_index = 1, set = 0, binding = 1) uniform subpassInput u_normals;
 
 layout(push_constant) uniform PushConstants {
+    // The `color` parameter of the `draw` method.
     vec4 color;
+    // The `direction` parameter of the `draw` method.
     vec4 direction;
 } push_constants;
 
@@ -170,7 +193,12 @@ layout(location = 0) out vec4 f_color;
 
 void main() {
     vec3 in_normal = normalize(subpassLoad(u_normals).rgb);
-    float light_percent = max(-dot(push_constants.direction.xyz, in_normal), 0.0);
+    // If the normal is perpendicular to the direction of the lighting, then `light_percent` will
+    // be 0. If the normal is parallel to the direction of the lightin, then `light_percent` will
+    // be 1. Any other angle will yield an intermediate value.
+    float light_percent = -dot(push_constants.direction.xyz, in_normal);
+    // `light_percent` must not go below 0.0. There's no such thing as negative lighting.
+    light_percent = max(light_percent, 0.0);
 
     vec3 in_diffuse = subpassLoad(u_diffuse).rgb;
     f_color.rgb = light_percent * push_constants.color.rgb * in_diffuse;

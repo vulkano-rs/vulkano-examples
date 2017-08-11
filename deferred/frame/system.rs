@@ -87,6 +87,12 @@ impl FrameSystem {
         // > `[1.0, 0.5, 0.5]` as desired. In a real-life application you want to use an additional
         // > intermediate image which a floating-point format, then perform additional passes to
         // > convert all the colors in the correct range. This is known as HDR and tone mapping.
+        //
+        // Input attachments are a special kind of way to read images. You can only read from them
+        // from a fragment shader, and you can only read the pixel corresponding to the pixel
+        // currently being processed by the fragment shader. If you want to read from attachments
+        // but can't deal with these restrictions, then you should create multiple render passes
+        // instead.
         let render_pass = Arc::new(
             ordered_passes_renderpass!(gfx_queue.device().clone(),
             attachments: {
@@ -218,6 +224,10 @@ impl FrameSystem {
                 ..ImageUsage::none()
             };
 
+            // Note that we create "transient" images here. This means that the content of the
+            // image is only defined when within a render pass. In other words you can draw to
+            // them in a subpass then read them in another subpass, but as soon as you leave the
+            // render pass their content becomes undefined.
             self.diffuse_buffer = AttachmentImage::with_usage(self.gfx_queue.device().clone(),
                                                               img_dims,
                                                               Format::A2B10G10R10UnormPack32,
