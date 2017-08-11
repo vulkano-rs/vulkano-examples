@@ -1,4 +1,4 @@
-// Copyright (c) 2016 The vulkano developers
+// Copyright (c) 2017 The vulkano developers
 // Licensed under the Apache License, Version 2.0
 // <LICENSE-APACHE or
 // http://www.apache.org/licenses/LICENSE-2.0> or the MIT
@@ -36,10 +36,7 @@ use cgmath::Vector3;
 
 use std::mem;
 
-mod ambient_lighting_system;
-mod directional_lighting_system;
 mod frame;
-mod point_lighting_system;
 mod triangle_draw_system;
 
 fn main() {

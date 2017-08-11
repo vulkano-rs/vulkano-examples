@@ -1,4 +1,4 @@
-// Copyright (c) 2016 The vulkano developers
+// Copyright (c) 2017 The vulkano developers
 // Licensed under the Apache License, Version 2.0
 // <LICENSE-APACHE or
 // http://www.apache.org/licenses/LICENSE-2.0> or the MIT
@@ -23,18 +23,20 @@ use vulkano::pipeline::blend::BlendOp;
 use vulkano::pipeline::GraphicsPipeline;
 use vulkano::pipeline::GraphicsPipelineAbstract;
 use vulkano::pipeline::viewport::Viewport;
+use cgmath::Matrix4;
+use cgmath::Vector3;
 
 use std::sync::Arc;
 
-pub struct AmbientLightingSystem {
+pub struct PointLightingSystem {
     gfx_queue: Arc<Queue>,
     vertex_buffer: Arc<CpuAccessibleBuffer<[Vertex]>>,
     pipeline: Arc<GraphicsPipelineAbstract + Send + Sync>,
 }
 
-impl AmbientLightingSystem {
-    /// Initializes the ambient lighting system.
-    pub fn new<R>(gfx_queue: Arc<Queue>, subpass: Subpass<R>) -> AmbientLightingSystem
+impl PointLightingSystem {
+    /// Initializes the point lighting system.
+    pub fn new<R>(gfx_queue: Arc<Queue>, subpass: Subpass<R>) -> PointLightingSystem
         where R: RenderPassAbstract + Send + Sync + 'static
     {
         // TODO: vulkano doesn't allow us to draw without a vertex buffer, otherwise we could
@@ -77,7 +79,7 @@ impl AmbientLightingSystem {
                 .unwrap()) as Arc<_>
         };
 
-        AmbientLightingSystem {
+        PointLightingSystem {
             gfx_queue: gfx_queue,
             vertex_buffer: vertex_buffer,
             pipeline: pipeline,
@@ -85,16 +87,25 @@ impl AmbientLightingSystem {
     }
 
     /// Builds a secondary command buffer that draws the triangle on the current subpass.
-    pub fn draw<C>(&self, viewport_dimensions: [u32; 2], color_input: C,
-                   ambient_color: [f32; 3]) -> AutoCommandBuffer
+    pub fn draw<C, N, D>(&self, viewport_dimensions: [u32; 2], color_input: C, normals_input: N,
+                         depth_input: D, screen_to_world: Matrix4<f32>, position: Vector3<f32>,
+                         color: [f32; 3]) -> AutoCommandBuffer
         where C: ImageViewAccess + Send + Sync + 'static,
+              N: ImageViewAccess + Send + Sync + 'static,
+              D: ImageViewAccess + Send + Sync + 'static,
     {
         let push_constants = fs::ty::PushConstants {
-            color: [ambient_color[0], ambient_color[1], ambient_color[2], 1.0],
+            screen_to_world: screen_to_world.into(),
+            color: [color[0], color[1], color[2], 1.0],
+            position: position.extend(0.0).into(),
         };
 
         let descriptor_set = PersistentDescriptorSet::start(self.pipeline.clone(), 0)
             .add_image(color_input)
+            .unwrap()
+            .add_image(normals_input)
+            .unwrap()
+            .add_image(depth_input)
             .unwrap()
             .build()
             .unwrap();
@@ -137,8 +148,10 @@ mod vs {
 #version 450
 
 layout(location = 0) in vec2 position;
+layout(location = 0) out vec2 v_screen_coords;
 
 void main() {
+    v_screen_coords = position;
     gl_Position = vec4(position, 0.0, 1.0);
 }
 "]
@@ -152,16 +165,35 @@ mod fs {
 #version 450
 
 layout(input_attachment_index = 0, set = 0, binding = 0) uniform subpassInput u_diffuse;
+layout(input_attachment_index = 1, set = 0, binding = 1) uniform subpassInput u_normals;
+layout(input_attachment_index = 2, set = 0, binding = 2) uniform subpassInput u_depth;
 
 layout(push_constant) uniform PushConstants {
+    mat4 screen_to_world;
     vec4 color;
+    vec4 position;
 } push_constants;
 
+layout(location = 0) in vec2 v_screen_coords;
 layout(location = 0) out vec4 f_color;
 
 void main() {
+    float in_depth = subpassLoad(u_depth).x;
+    if (in_depth >= 1.0) {
+        discard;
+    }
+    vec4 world = push_constants.screen_to_world * vec4(v_screen_coords, in_depth, 1.0);
+    world /= world.w;
+
+    vec3 in_normal = normalize(subpassLoad(u_normals).rgb);
+    vec3 light_direction = normalize(push_constants.position.xyz - world.xyz);
+    float light_percent = max(-dot(light_direction, in_normal), 0.0);
+
+    float light_distance = length(push_constants.position.xyz - world.xyz);
+    light_percent *= 1.0 / exp(light_distance);
+
     vec3 in_diffuse = subpassLoad(u_diffuse).rgb;
-    f_color.rgb = push_constants.color.rgb * in_diffuse;
+    f_color.rgb = push_constants.color.rgb * light_percent * in_diffuse;
     f_color.a = 1.0;
 }
 "]

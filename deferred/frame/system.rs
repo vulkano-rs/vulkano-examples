@@ -1,4 +1,4 @@
-// Copyright (c) 2016 The vulkano developers
+// Copyright (c) 2017 The vulkano developers
 // Licensed under the Apache License, Version 2.0
 // <LICENSE-APACHE or
 // http://www.apache.org/licenses/LICENSE-2.0> or the MIT
@@ -25,9 +25,9 @@ use vulkano::image::ImageUsage;
 use vulkano::image::ImageViewAccess;
 use vulkano::sync::GpuFuture;
 
-use ambient_lighting_system::AmbientLightingSystem;
-use directional_lighting_system::DirectionalLightingSystem;
-use point_lighting_system::PointLightingSystem;
+use frame::ambient_lighting_system::AmbientLightingSystem;
+use frame::directional_lighting_system::DirectionalLightingSystem;
+use frame::point_lighting_system::PointLightingSystem;
 
 /// System that contains the necessary facilities for rendering a single frame.
 pub struct FrameSystem {
