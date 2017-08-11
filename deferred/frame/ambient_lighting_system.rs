@@ -132,6 +132,7 @@ impl_vertex!(Vertex, position);
 
 mod vs {
     #[derive(VulkanoShader)]
+    #[allow(dead_code)]
     #[ty = "vertex"]
     #[src = "
 #version 450
@@ -147,6 +148,7 @@ void main() {
 
 mod fs {
     #[derive(VulkanoShader)]
+    #[allow(dead_code)]
     #[ty = "fragment"]
     #[src = "
 #version 450

@@ -7,7 +7,24 @@
 // notice may not be copied, modified, or distributed except
 // according to those terms.
 
-#![allow(dead_code)]
+
+// Welcome to the deferred lighting example!
+// 
+// The idea behind deferred lighting is to render the scene in two steps.
+// 
+// First you draw all the objects of the scene. But instead of calculating the color they will
+// have on the screen, you output their characteristics such as their diffuse color and their
+// normals, and write this to images.
+// 
+// After all the objects are drawn, you should obtain several images that contain the
+// characteristics of each pixel.
+// 
+// Then you apply lighting to the screne. In other words you draw to the final image by taking
+// these intermediate images and the various lights of the scene as input.
+// 
+// This technique allows you to apply tons of light sources to a scene, which would be too
+// expensive otherwise. It has some drawbacks, which are the fact that transparent objects must be
+// drawn after the lighting, and that the whole process consumes more memory.
 
 extern crate cgmath;
 #[macro_use]
@@ -48,12 +65,9 @@ fn main() {
     let physical = vulkano::instance::PhysicalDevice::enumerate(&instance)
                             .next().expect("no device available");
 
-
     let mut events_loop = winit::EventsLoop::new();
     let window = winit::WindowBuilder::new().build_vk_surface(&events_loop, instance.clone()).unwrap();
 
-    // Get the dimensions of the viewport. These variables need to be mutable since the viewport
-    // can change size.
     let dimensions = {
         let (width, height) = window.window().get_inner_size_pixels().unwrap();
         [width, height]
@@ -86,6 +100,8 @@ fn main() {
                        None).expect("failed to create swapchain")
     };
 
+
+    // Here is the basic initialization for the deferred system.
     let mut frame_system = frame::FrameSystem::new(queue.clone(), swapchain.format());
     let triangle_draw_system = triangle_draw_system::TriangleDrawSystem::new(queue.clone(),
                                                                              frame_system.deferred_subpass());
@@ -96,9 +112,7 @@ fn main() {
     loop {
         previous_frame_end.cleanup_finished();
 
-        // If the swapchain needs to be recreated, recreate it
         if recreate_swapchain {
-            // Get the new dimensions for the viewport/framebuffers.
             let dimensions = {
                 let (new_width, new_height) = window.window().get_inner_size_pixels().unwrap();
                 [new_width, new_height]
@@ -106,8 +120,6 @@ fn main() {
             
             let (new_swapchain, new_images) = match swapchain.recreate_with_dimension(dimensions) {
                 Ok(r) => r,
-                // This error tends to happen when the user is manually resizing the window.
-                // Simply restarting the loop is the easiest way to fix this issue.
                 Err(SwapchainCreationError::UnsupportedDimensions) => {
                     continue;
                 },
@@ -119,13 +131,6 @@ fn main() {
             recreate_swapchain = false;
         }
 
-        // Before we can draw on the output, we have to *acquire* an image from the swapchain. If
-        // no image is available (which happens if you submit draw commands too quickly), then the
-        // function will block.
-        // This operation returns the index of the image that we are allowed to draw upon.
-        //
-        // This function can block if no image is available. The parameter is an optional timeout
-        // after which the function call will return an error.
         let (image_num, acquire_future) = match swapchain::acquire_next_image(swapchain.clone(),
                                                                               None) {
             Ok(r) => r,
@@ -149,6 +154,8 @@ fn main() {
                     lighting.ambient_light([0.1, 0.1, 0.1]);
                     lighting.directional_light(Vector3::new(0.2, -0.1, -0.7), [0.6, 0.6, 0.6]);
                     lighting.point_light(Vector3::new(0.5, -0.5, -0.1), [1.0, 0.0, 0.0]);
+                    lighting.point_light(Vector3::new(-0.9, 0.2, -0.15), [0.0, 1.0, 0.0]);
+                    lighting.point_light(Vector3::new(0.0, 0.5, -0.05), [0.0, 0.0, 1.0]);
                 },
                 frame::Pass::Finished(af) => {
                     after_future = Some(af);

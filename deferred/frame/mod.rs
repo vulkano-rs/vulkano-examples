@@ -7,6 +7,11 @@
 // notice may not be copied, modified, or distributed except
 // according to those terms.
 
+// This module exposes what is needed in order to draw with a deferred rendering system.
+//
+// The main code is in the `system` module, while the other modules implement the different kinds
+// of lighting sources.
+
 pub use self::system::DrawPass;
 pub use self::system::FrameSystem;
 pub use self::system::Frame;
