@@ -13,5 +13,9 @@ winit = "0.7.0"
 time = "0.1.37"
 
 [[bin]]
+name = "deferred"
+path = "deferred/main.rs"
+
+[[bin]]
 name = "triangle"
 path = "triangle/main.rs"
