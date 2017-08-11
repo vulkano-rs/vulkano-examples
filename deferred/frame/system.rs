@@ -85,8 +85,9 @@ impl FrameSystem {
         // > then it will be clamped. For example a pixel of `[2.0, 1.0, 1.0]` (which is red) will
         // > be clamped to `[1.0, 1.0, 1.0]` (which is white) instead of being converted to
         // > `[1.0, 0.5, 0.5]` as desired. In a real-life application you want to use an additional
-        // > intermediate image which a floating-point format, then perform additional passes to
-        // > convert all the colors in the correct range. This is known as HDR and tone mapping.
+        // > intermediate image with a floating-point format, then perform additional passes to
+        // > convert all the colors in the correct range. These techniques are known as HDR and
+        // > tone mapping.
         //
         // Input attachments are a special kind of way to read images. You can only read from them
         // from a fragment shader, and you can only read the pixel corresponding to the pixel
