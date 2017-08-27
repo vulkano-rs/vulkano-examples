@@ -4,9 +4,9 @@ version = "0.1.0"
 authors = ["Pierre Krieger <pierre.krieger1708@gmail.com>"]
 
 [dependencies]
-vulkano = "0.5.6"
-vulkano-shader-derive = "0.5.6"
-vulkano-win = "0.5.6"
+vulkano = "0.6.0"
+vulkano-shader-derive = "0.6.0"
+vulkano-win = "0.6.0"
 cgmath = "0.14.1"
 gltf = "0.7.0"
 image = "0.14.0"
