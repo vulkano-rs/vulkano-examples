@@ -18,7 +18,6 @@ use vulkano::buffer::ImmutableBuffer;
 use vulkano::command_buffer::AutoCommandBufferBuilder;
 use vulkano::command_buffer::DynamicState;
 use vulkano::descriptor::descriptor::DescriptorBufferDesc;
-use vulkano::descriptor::descriptor::DescriptorBufferContentDesc;
 use vulkano::descriptor::descriptor::DescriptorImageDesc;
 use vulkano::descriptor::descriptor::DescriptorImageDescArray;
 use vulkano::descriptor::descriptor::DescriptorImageDescDimensions;
@@ -29,7 +28,6 @@ use vulkano::descriptor::descriptor_set::DescriptorSet;
 use vulkano::descriptor::descriptor_set::PersistentDescriptorSet;
 use vulkano::descriptor::pipeline_layout::PipelineLayoutAbstract;
 use vulkano::descriptor::pipeline_layout::PipelineLayoutDesc;
-use vulkano::descriptor::pipeline_layout::PipelineLayoutDescNames;
 use vulkano::descriptor::pipeline_layout::PipelineLayoutDescPcRange;
 use vulkano::device::Queue;
 use vulkano::format::Format;
@@ -104,8 +102,7 @@ impl GltfModel {
             for buffer in gltf.buffers() {
                 let (buf, future) = {
                     ImmutableBuffer::from_iter(buffer.data().iter().cloned(),
-                                            BufferUsage::all(),
-                                            Some(queue.family()), queue.clone())
+                                            BufferUsage::all(), queue.clone())
                                             .expect("Failed to create immutable buffer")
                 };
 
@@ -147,7 +144,7 @@ impl GltfModel {
 
                 let (img, future) = {
                     ImmutableImage::from_iter(raw_pixels.into_iter(), dimensions, format,
-                                            Some(queue.family()), queue.clone())
+                                            queue.clone())
                                             .expect("Failed to create immutable image")
                 };
                 final_future = Box::new(final_future.join(future));
@@ -167,8 +164,7 @@ impl GltfModel {
         // We are going to build a descriptor set for each material defined in the glTF file.
         let gltf_materials: Vec<Arc<DescriptorSet + Send + Sync>> = {
             // TODO: meh, we want some device-local thing here
-            let params_buffer = CpuBufferPool::new(queue.device().clone(), BufferUsage::uniform_buffer(),
-                                                    Some(queue.family()));
+            let params_buffer = CpuBufferPool::new(queue.device().clone(), BufferUsage::uniform_buffer());
 
             // Vulkano doesn't allow us to bind *nothing* in a descriptor, so we create a dummy
             // texture and a dummy sampler to use when a texture or a sampler is missing.
@@ -176,7 +172,7 @@ impl GltfModel {
             let (dummy_texture, _) = 
                     ImmutableImage::from_iter([0u8].iter().cloned(),
                                             Dimensions::Dim2d { width: 1, height: 1 },
-                                            Format::R8Unorm, Some(queue.family()), queue.clone())
+                                            Format::R8Unorm, queue.clone())
                                             .expect("Failed to create immutable image");
 
             let mut materials = Vec::new();
@@ -342,8 +338,7 @@ impl GltfModel {
             gltf: gltf,
             gltf_meshes: gltf_meshes,
             instance_params_upload: CpuBufferPool::new(queue.device().clone(),
-                                                       BufferUsage::uniform_buffer(),
-                                                       Some(queue.family())),
+                                                       BufferUsage::uniform_buffer()),
             pipeline_layout: pipeline_layout,
         }
     }
@@ -789,9 +784,7 @@ unsafe impl PipelineLayoutDesc for MyPipelineLayout {
                                     DescriptorDescTy::Buffer(DescriptorBufferDesc{dynamic:
                                                                                         Some(false),
                                                                                     storage:
-                                                                                        false,
-                                                                                    content:
-                                                                                        DescriptorBufferContentDesc::F32,}),
+                                                                                        false,}),
                                 array_count: 1,
                                 stages: ShaderStages { vertex: true, .. ShaderStages::none() },
                                 readonly: true,}),
@@ -800,9 +793,7 @@ unsafe impl PipelineLayoutDesc for MyPipelineLayout {
                                     DescriptorDescTy::Buffer(DescriptorBufferDesc{dynamic:
                                                                                         Some(false),
                                                                                     storage:
-                                                                                        false,
-                                                                                    content:
-                                                                                        DescriptorBufferContentDesc::F32,}),
+                                                                                        false,}),
                                 array_count: 1,
                                 stages: ShaderStages { fragment: true, .. ShaderStages::none() },
                                 readonly: true,}),
@@ -891,20 +882,5 @@ unsafe impl PipelineLayoutDesc for MyPipelineLayout {
         Some(PipelineLayoutDescPcRange{offset: 0,
                                         size: 0,
                                         stages: ShaderStages::all(),})
-    }
-}
-
-unsafe impl PipelineLayoutDescNames for MyPipelineLayout {
-    fn descriptor_by_name(&self, name: &str)
-        -> Option<(usize, usize)> {
-        match name {
-            "u_material_params" => Some((0, 0)),
-            "u_base_color" => Some((0, 1)),
-            "u_metallic_roughness" => Some((0, 2)),
-            "u_normal_texture" => Some((0, 3)),
-            "u_occlusion_texture" => Some((0, 4)),
-            "u_emissive_texture" => Some((0, 5)),
-            _ => None,
-        }
     }
 }
