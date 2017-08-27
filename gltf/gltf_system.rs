@@ -17,18 +17,11 @@ use vulkano::buffer::CpuBufferPool;
 use vulkano::buffer::ImmutableBuffer;
 use vulkano::command_buffer::AutoCommandBufferBuilder;
 use vulkano::command_buffer::DynamicState;
-use vulkano::descriptor::descriptor::DescriptorBufferDesc;
-use vulkano::descriptor::descriptor::DescriptorImageDesc;
-use vulkano::descriptor::descriptor::DescriptorImageDescArray;
-use vulkano::descriptor::descriptor::DescriptorImageDescDimensions;
-use vulkano::descriptor::descriptor::DescriptorDesc;
-use vulkano::descriptor::descriptor::DescriptorDescTy;
 use vulkano::descriptor::descriptor::ShaderStages;
 use vulkano::descriptor::descriptor_set::DescriptorSet;
 use vulkano::descriptor::descriptor_set::PersistentDescriptorSet;
 use vulkano::descriptor::pipeline_layout::PipelineLayoutAbstract;
 use vulkano::descriptor::pipeline_layout::PipelineLayoutDesc;
-use vulkano::descriptor::pipeline_layout::PipelineLayoutDescPcRange;
 use vulkano::device::Queue;
 use vulkano::format::Format;
 use vulkano::framebuffer::RenderPassAbstract;
@@ -159,7 +152,11 @@ impl GltfModel {
         // ahead of time. This object is normally automatically built by vulkano at the same time
         // as the graphics pipeline, but here we create it immediately and will pass it when
         // building the pipelines.
-        let pipeline_layout = Arc::new(MyPipelineLayout.build(queue.device().clone()).unwrap());
+        let pipeline_layout = {
+            let vs = vs::Layout(ShaderStages { vertex: true, .. ShaderStages::none() });
+            let fs = fs::Layout(ShaderStages { fragment: true, .. ShaderStages::none() });
+            Arc::new(vs.union(fs).build(queue.device().clone()).unwrap())
+        };
 
         // We are going to build a descriptor set for each material defined in the glTF file.
         let gltf_materials: Vec<Arc<DescriptorSet + Send + Sync>> = {
@@ -765,122 +762,5 @@ unsafe impl VertexSource<Vec<Arc<BufferAccess + Send + Sync>>> for RuntimeVertex
         -> (Vec<Box<BufferAccess + Send + Sync>>, usize, usize)
     {
         (bufs.into_iter().map(|b| Box::new(b) as Box<_>).collect(), self.num_vertices as usize, 1)
-    }
-}
-
-#[derive(Debug, Copy, Clone)]
-struct MyPipelineLayout;
-
-unsafe impl PipelineLayoutDesc for MyPipelineLayout {
-    fn num_sets(&self) -> usize { 2 }
-    fn num_bindings_in_set(&self, set: usize) -> Option<usize> {
-        match set { 0 => Some(1), 1 => Some(6), _ => None, }
-    }
-    fn descriptor(&self, set: usize, binding: usize)
-        -> Option<DescriptorDesc> {
-        match (set, binding) {
-            (0, 0) =>
-            Some(DescriptorDesc{ty:
-                                    DescriptorDescTy::Buffer(DescriptorBufferDesc{dynamic:
-                                                                                        Some(false),
-                                                                                    storage:
-                                                                                        false,}),
-                                array_count: 1,
-                                stages: ShaderStages { vertex: true, .. ShaderStages::none() },
-                                readonly: true,}),
-            (1, 0) =>
-            Some(DescriptorDesc{ty:
-                                    DescriptorDescTy::Buffer(DescriptorBufferDesc{dynamic:
-                                                                                        Some(false),
-                                                                                    storage:
-                                                                                        false,}),
-                                array_count: 1,
-                                stages: ShaderStages { fragment: true, .. ShaderStages::none() },
-                                readonly: true,}),
-            (1, 1) =>
-            Some(DescriptorDesc{ty:
-                                    DescriptorDescTy::CombinedImageSampler(DescriptorImageDesc{sampled:
-                                                                                                    true,
-                                                                                                dimensions:
-                                                                                                    DescriptorImageDescDimensions::TwoDimensional,
-                                                                                                format:
-                                                                                                    None,
-                                                                                                multisampled:
-                                                                                                    false,
-                                                                                                array_layers:
-                                                                                                    DescriptorImageDescArray::NonArrayed,}),
-                                array_count: 1,
-                                stages: ShaderStages { fragment: true, .. ShaderStages::none() },
-                                readonly: true,}),
-            (1, 2) =>
-            Some(DescriptorDesc{ty:
-                                    DescriptorDescTy::CombinedImageSampler(DescriptorImageDesc{sampled:
-                                                                                                    true,
-                                                                                                dimensions:
-                                                                                                    DescriptorImageDescDimensions::TwoDimensional,
-                                                                                                format:
-                                                                                                    None,
-                                                                                                multisampled:
-                                                                                                    false,
-                                                                                                array_layers:
-                                                                                                    DescriptorImageDescArray::NonArrayed,}),
-                                array_count: 1,
-                                stages: ShaderStages { fragment: true, .. ShaderStages::none() },
-                                readonly: true,}),
-            (1, 3) =>
-            Some(DescriptorDesc{ty:
-                                    DescriptorDescTy::CombinedImageSampler(DescriptorImageDesc{sampled:
-                                                                                                    true,
-                                                                                                dimensions:
-                                                                                                    DescriptorImageDescDimensions::TwoDimensional,
-                                                                                                format:
-                                                                                                    None,
-                                                                                                multisampled:
-                                                                                                    false,
-                                                                                                array_layers:
-                                                                                                    DescriptorImageDescArray::NonArrayed,}),
-                                array_count: 1,
-                                stages: ShaderStages { fragment: true, .. ShaderStages::none() },
-                                readonly: true,}),
-            (1, 4) =>
-            Some(DescriptorDesc{ty:
-                                    DescriptorDescTy::CombinedImageSampler(DescriptorImageDesc{sampled:
-                                                                                                    true,
-                                                                                                dimensions:
-                                                                                                    DescriptorImageDescDimensions::TwoDimensional,
-                                                                                                format:
-                                                                                                    None,
-                                                                                                multisampled:
-                                                                                                    false,
-                                                                                                array_layers:
-                                                                                                    DescriptorImageDescArray::NonArrayed,}),
-                                array_count: 1,
-                                stages: ShaderStages { fragment: true, .. ShaderStages::none() },
-                                readonly: true,}),
-            (1, 5) =>
-            Some(DescriptorDesc{ty:
-                                    DescriptorDescTy::CombinedImageSampler(DescriptorImageDesc{sampled:
-                                                                                                    true,
-                                                                                                dimensions:
-                                                                                                    DescriptorImageDescDimensions::TwoDimensional,
-                                                                                                format:
-                                                                                                    None,
-                                                                                                multisampled:
-                                                                                                    false,
-                                                                                                array_layers:
-                                                                                                    DescriptorImageDescArray::NonArrayed,}),
-                                array_count: 1,
-                                stages: ShaderStages { fragment: true, .. ShaderStages::none() },
-                                readonly: true,}),
-            _ => None,
-        }
-    }
-    fn num_push_constants_ranges(&self) -> usize { 0 }
-    fn push_constants_range(&self, num: usize)
-        -> Option<PipelineLayoutDescPcRange> {
-        if num != 0 || 0 == 0 { return None; }
-        Some(PipelineLayoutDescPcRange{offset: 0,
-                                        size: 0,
-                                        stages: ShaderStages::all(),})
     }
 }
