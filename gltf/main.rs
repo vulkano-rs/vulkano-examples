@@ -16,6 +16,7 @@
 extern crate cgmath;
 extern crate gltf;
 extern crate gltf_importer;
+extern crate image;
 #[macro_use]
 extern crate vulkano;
 #[macro_use]
@@ -40,6 +41,7 @@ use vulkano::sync::now;
 use vulkano::sync::GpuFuture;
 
 use std::env;
+use std::path::Path;
 use std::sync::Arc;
 use std::mem;
 
@@ -105,15 +107,14 @@ fn main() {
     // This is where the glTF-specific code starts.
 
     // Try loading our glTF model.
-    let gltf = {
-        let args: Vec<_> = env::args().collect();
-        let path = args.get(1).map(|s| s.as_str()).unwrap_or("gltf/Duck.gltf");
-        let import = gltf::Import::from_path(path);
-        import.sync().expect("Error while loading glTF file")
-    };
+    let args: Vec<_> = env::args().collect();
+    let path = args.get(1).map(|s| s.as_str()).unwrap_or("gltf/Duck.gltf");
+    let base = Path::new(path).parent().unwrap_or(Path::new("gltf"));
+    let (gltf, buffers) = gltf_importer::import(path)
+        .expect("Error while loading glTF file");
 
     // Upload everything to get ready for drawing.
-    let model = gltf_system::GltfModel::new(gltf, queue.clone(),
+    let model = gltf_system::GltfModel::new(gltf, &buffers, base, queue.clone(),
                                             Subpass::from(render_pass.clone(), 0).unwrap());
 
 

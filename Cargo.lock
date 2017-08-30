@@ -8,7 +8,7 @@ dependencies = [
  "image 0.14.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "time 0.1.38 (registry+https://github.com/rust-lang/crates.io-index)",
  "vulkano 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "vulkano-shader-derive 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "vulkano-shader-derive 0.6.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "vulkano-win 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "winit 0.7.5 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
@@ -795,7 +795,7 @@ dependencies = [
 
 [[package]]
 name = "vulkano-shader-derive"
-version = "0.6.0"
+version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 dependencies = [
  "glsl-to-spirv 0.1.3 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -1027,7 +1027,7 @@ dependencies = [
 "checksum user32-sys 0.1.2 (registry+https://github.com/rust-lang/crates.io-index)" = "6717129de5ac253f5642fc78a51d0c7de6f9f53d617fc94e9bae7f6e71cf5504"
 "checksum vk-sys 0.3.1 (registry+https://github.com/rust-lang/crates.io-index)" = "49731d969a9bfa20852d4f2e82fc354a3ebc7af37bb23c3c23fe420882b4807f"
 "checksum vulkano 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)" = "65093ea436c9dea2e6c680c23a0c5443c565d1df53ae3679e9dd0fec074fbeb5"
-"checksum vulkano-shader-derive 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)" = "f2ba6ba65817eeb89d03981543f38fc2ad62b7a22ea16e1155f925f7ee73e496"
+"checksum vulkano-shader-derive 0.6.1 (registry+https://github.com/rust-lang/crates.io-index)" = "9e071535f9612f25fbc3b7073ab21ff768ca038da90432fcff9d5fdc215d55f7"
 "checksum vulkano-shaders 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)" = "da6a9146549cfcb36b512e9fe74286453866fe091f68b79d6cb823e7ae60b91c"
 "checksum vulkano-win 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)" = "fbe957f536c2d05efcb1a681a395cee9287c6c76d830e74475bd6fa5b304710e"
 "checksum wayland-client 0.9.9 (registry+https://github.com/rust-lang/crates.io-index)" = "15aaf730e0720ac3c25259bd8af44eacd509ae03e85a3ca64b0d4f7fe9d8da03"

@@ -45,16 +45,21 @@ use vulkano::sync::now;
 use cgmath::Matrix4;
 use cgmath::SquareMatrix;
 
+use std::fs::File;
+use std::io::BufReader;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::vec::IntoIter as VecIntoIter;
 
 use gltf;
 use gltf_importer;
 
+use image;
+
 /// Represents a fully-loaded glTF model, ready to be drawn.
 pub struct GltfModel {
     // The main glTF document.
-    gltf: gltf::gltf::Gltf,
+    gltf: gltf::Gltf,
     // Each mesh of the glTF scene is made of one or more primitives.
     gltf_meshes: Vec<Vec<PrimitiveInfo>>,
     // Buffer used to upload `InstanceParams` when drawing.
@@ -75,6 +80,67 @@ struct PrimitiveInfo {
     material: Arc<DescriptorSet + Send + Sync>,
 }
 
+fn load_gltf_image_data(
+    data: &gltf::image::Data,
+    buffers: &gltf_importer::Buffers,
+    base: &Path,
+) -> (Dimensions, Format, Vec<u8>) {
+    use image::DynamicImage::*;
+    use image::ImageFormat::{JPEG as Jpeg, PNG as Png};
+    let image = match *data {
+        gltf::image::Data::View { view, mime_type } => {
+            let format = match mime_type {
+                "image/png" => Png,
+                "image/jpeg" => Jpeg,
+                _ => unreachable!(),
+            };
+            let data = buffers.view(&view).unwrap();
+            if data.starts_with(b"data:") {
+                // TODO: Data URI decoding for images must be handled by the user
+                unimplemented!()
+            } else {
+                image::load_from_memory_with_format(&data, format)
+            }
+        },
+        gltf::image::Data::Uri { uri, mime_type } => {
+            let path: PathBuf = base.join(uri);
+            if let Some(ty) = mime_type {
+                let format = match ty {
+                    "image/png" => Png,
+                    "image/jpeg" => Jpeg,
+                    _ => unreachable!(),
+                };
+                let file = File::open(&path).unwrap();
+                let reader = BufReader::new(file);
+                image::load(reader, format)
+            } else {
+                image::open(&path)
+            }
+        },
+    }.expect("image decoding failed");
+
+    match image {
+        ImageLuma8(buf) => {
+            let dimensions = Dimensions::Dim2d { width: buf.width(), height: buf.height() };
+            (dimensions, Format::R8Srgb, buf.into_raw())
+        },
+        ImageLumaA8(buf) => {
+            let dimensions = Dimensions::Dim2d { width: buf.width(), height: buf.height() };
+            (dimensions, Format::R8G8Srgb, buf.into_raw())
+        },
+        ImageRgb8(_) => {
+            // Since RGB is often not supported by Vulkan, convert to RGBA instead.
+            let rgba = image.to_rgba();
+            let dimensions = Dimensions::Dim2d { width: rgba.width(), height: rgba.height() };
+            (dimensions, Format::R8G8B8A8Srgb, rgba.into_raw())
+        },
+        ImageRgba8(buf) => {
+            let dimensions = Dimensions::Dim2d { width: buf.width(), height: buf.height() };
+            (dimensions, Format::R8G8B8A8Srgb, buf.into_raw())
+        },
+    }
+}
+
 impl GltfModel {
     /// Loads all the resources necessary to draw `gltf`.
     ///
@@ -82,7 +148,11 @@ impl GltfModel {
     /// part of the loading.
     ///
     /// The `subpass` parameter is the render pass subpass that we will need to be in when drawing.
-    pub fn new<R>(gltf: gltf::gltf::Gltf, queue: Arc<Queue>, subpass: Subpass<R>) -> GltfModel
+    pub fn new<R>(gltf: gltf::Gltf,
+                  buffers: &gltf_importer::Buffers,
+                  base: &Path,
+                  queue: Arc<Queue>,
+                  subpass: Subpass<R>) -> GltfModel
         where R: RenderPassAbstract + Clone + Send + Sync + 'static
     {
         // This variable will be modified during the function, and will correspond to when the
@@ -92,18 +162,19 @@ impl GltfModel {
         // The first step is to go through all the glTF buffer definitions and load them as
         // `ImmutableBuffer`.
         let gltf_buffers: Vec<Arc<ImmutableBuffer<[u8]>>> = {
-            let mut buffers = Vec::new();
+            let mut gpu_buffers = Vec::new();
             for buffer in gltf.buffers() {
+                let data = buffers.buffer(&buffer).unwrap();
                 let (buf, future) = {
-                    ImmutableBuffer::from_iter(buffer.data().iter().cloned(),
+                    ImmutableBuffer::from_iter(data.iter().cloned(),
                                             BufferUsage::all(), queue.clone())
                                             .expect("Failed to create immutable buffer")
                 };
 
                 final_future = Box::new(final_future.join(future));
-                buffers.push(buf);
+                gpu_buffers.push(buf);
             }
-            buffers
+            gpu_buffers
         };
 
         // Then we go through each glTF texture and load them.
@@ -113,29 +184,8 @@ impl GltfModel {
 
             let mut textures = Vec::new();
             for texture in gltf.textures() {
-                let (dimensions, format, raw_pixels) = match texture.source().data() {
-                    // Note that the gltf crate doesn't allow us to extract the image data without
-                    // cloning.
-                    &gltf::import::data::DynamicImage::ImageLuma8(ref buf) => {
-                        let dimensions = Dimensions::Dim2d { width: buf.width(), height: buf.height() };
-                        (dimensions, Format::R8Srgb, buf.clone().into_raw())
-                    },
-                    &gltf::import::data::DynamicImage::ImageLumaA8(ref buf) => {
-                        let dimensions = Dimensions::Dim2d { width: buf.width(), height: buf.height() };
-                        (dimensions, Format::R8G8Srgb, buf.clone().into_raw())
-                    },
-                    &gltf::import::data::DynamicImage::ImageRgb8(ref buf) => {
-                        // Since RGB is often not supported by Vulkan, convert to RGBA instead.
-                        let dimensions = Dimensions::Dim2d { width: buf.width(), height: buf.height() };
-                        let rgba = gltf::import::data::DynamicImage::ImageRgb8(buf.clone()).to_rgba();
-                        (dimensions, Format::R8G8B8A8Srgb, rgba.into_raw())
-                    },
-                    &gltf::import::data::DynamicImage::ImageRgba8(ref buf) => {
-                        let dimensions = Dimensions::Dim2d { width: buf.width(), height: buf.height() };
-                        (dimensions, Format::R8G8B8A8Srgb, buf.clone().into_raw())
-                    },
-                };
-
+                let data = texture.source().data();
+                let (dimensions, format, raw_pixels) = load_gltf_image_data(&data, buffers, base);
                 let (img, future) = {
                     ImmutableImage::from_iter(raw_pixels.into_iter(), dimensions, format,
                                             queue.clone())
@@ -174,51 +224,40 @@ impl GltfModel {
                                             .expect("Failed to create immutable image");
 
             let mut materials = Vec::new();
-            for material in gltf.as_json().materials.iter() {
+            for mat in gltf.materials() {
                 // Create a buffer that stores some basic parameter values.
                 // These fields are the same as the one found in the shader's source code.
+                let pbr = mat.pbr_metallic_roughness();
                 let material_params = params_buffer.next(fs::ty::MaterialParams {
-                    base_color_factor: material.pbr_metallic_roughness.as_ref()
-                                    .map(|t| t.base_color_factor.0).unwrap_or([1.0, 1.0, 1.0, 1.0]),
-                    base_color_texture_tex_coord: material.pbr_metallic_roughness.as_ref()
-                                .and_then(|t| t.base_color_texture.as_ref()).map(|t| t.tex_coord as i32).unwrap_or(-1),
-                    metallic_factor: material.pbr_metallic_roughness.as_ref()
-                                                        .map(|t| t.metallic_factor.0).unwrap_or(1.0),
-                    roughness_factor: material.pbr_metallic_roughness.as_ref()
-                                                        .map(|t| t.roughness_factor.0).unwrap_or(1.0),
-                    metallic_roughness_texture_tex_coord: material.pbr_metallic_roughness.as_ref()
-                        .and_then(|t| t.metallic_roughness_texture.as_ref()).map(|t| t.tex_coord as i32).unwrap_or(-1),
-                    normal_texture_scale: material.normal_texture.as_ref()
-                                                                .map(|t| t.scale).unwrap_or(0.0),
-                    normal_texture_tex_coord: material.normal_texture.as_ref()
-                                                        .map(|t| t.tex_coord as i32).unwrap_or(-1),
-                    occlusion_texture_tex_coord: material.occlusion_texture.as_ref()
-                                                        .map(|t| t.tex_coord as i32).unwrap_or(-1),
-                    occlusion_texture_strength: material.occlusion_texture.as_ref()
-                                                        .map(|t| t.strength.0).unwrap_or(0.0),
-                    emissive_texture_tex_coord: material.emissive_texture.as_ref()
-                                                        .map(|t| t.tex_coord as i32).unwrap_or(-1),
-                    emissive_factor: material.emissive_factor.0,
+                    base_color_factor: pbr.base_color_factor(),
+                    base_color_texture_tex_coord: pbr.base_color_texture().map(|t| t.tex_coord() as i32).unwrap_or(-1),
+                    metallic_factor: pbr.metallic_factor(),
+                    roughness_factor: pbr.roughness_factor(),
+                    metallic_roughness_texture_tex_coord: pbr.metallic_roughness_texture().map(|t| t.tex_coord() as i32).unwrap_or(-1),
+                    normal_texture_scale: mat.normal_texture().map(|t| t.scale()).unwrap_or(0.0),
+                    normal_texture_tex_coord: mat.normal_texture().map(|t| t.tex_coord() as i32).unwrap_or(-1),
+                    occlusion_texture_tex_coord: mat.occlusion_texture().map(|t| t.tex_coord() as i32).unwrap_or(-1),
+                    occlusion_texture_strength: mat.occlusion_texture().map(|t| t.strength()).unwrap_or(0.0),
+                    emissive_texture_tex_coord: mat.emissive_texture().map(|t| t.tex_coord() as i32).unwrap_or(-1),
+                    emissive_factor: mat.emissive_factor(),
                     _dummy0: [0; 12],
                 });
 
                 // Create the textures and samplers based on the glTF definition.
-                let base_color = material.pbr_metallic_roughness.as_ref()
-                    .and_then(|t| t.base_color_texture.as_ref())
-                    .map(|t| gltf_textures[t.index.value()].clone())
+                let base_color = pbr.base_color_texture()
+                    .map(|t| gltf_textures[t.texture().index()].clone())
                     .unwrap_or((dummy_texture.clone(), dummy_sampler.clone()));
-                let metallic_roughness = material.pbr_metallic_roughness.as_ref()
-                    .and_then(|t| t.metallic_roughness_texture.as_ref())
-                    .map(|t| gltf_textures[t.index.value()].clone())
+                let metallic_roughness = pbr.metallic_roughness_texture()
+                    .map(|t| gltf_textures[t.texture().index()].clone())
                     .unwrap_or((dummy_texture.clone(), dummy_sampler.clone()));
-                let normal_texture = material.normal_texture.as_ref()
-                    .map(|t| gltf_textures[t.index.value()].clone())
+                let normal_texture = mat.normal_texture()
+                    .map(|t| gltf_textures[t.texture().index()].clone())
                     .unwrap_or((dummy_texture.clone(), dummy_sampler.clone()));
-                let occlusion_texture = material.occlusion_texture.as_ref()
-                    .map(|t| gltf_textures[t.index.value()].clone())
+                let occlusion_texture = mat.occlusion_texture()
+                    .map(|t| gltf_textures[t.texture().index()].clone())
                     .unwrap_or((dummy_texture.clone(), dummy_sampler.clone()));
-                let emissive_texture = material.emissive_texture.as_ref()
-                    .map(|t| gltf_textures[t.index.value()].clone())
+                let emissive_texture = mat.emissive_texture()
+                    .map(|t| gltf_textures[t.texture().index()].clone())
                     .unwrap_or((dummy_texture.clone(), dummy_sampler.clone()));
 
                 // Building the descriptor set with all the things we built above.
