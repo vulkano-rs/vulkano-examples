@@ -49,6 +49,7 @@ use std::sync::Arc;
 use std::vec::IntoIter as VecIntoIter;
 
 use gltf;
+use gltf_importer;
 
 /// Represents a fully-loaded glTF model, ready to be drawn.
 pub struct GltfModel {

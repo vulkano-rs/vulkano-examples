@@ -15,6 +15,7 @@
 
 extern crate cgmath;
 extern crate gltf;
+extern crate gltf_importer;
 #[macro_use]
 extern crate vulkano;
 #[macro_use]
