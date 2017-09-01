@@ -88,7 +88,7 @@ fn load_gltf_image_data(
     use image::DynamicImage::*;
     use image::ImageFormat::{JPEG as Jpeg, PNG as Png};
     let image = match *data {
-        gltf::image::Data::View { view, mime_type } => {
+        gltf::image::Data::View { ref view, mime_type } => {
             let format = match mime_type {
                 "image/png" => Png,
                 "image/jpeg" => Jpeg,
