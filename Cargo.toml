@@ -4,7 +4,7 @@ version = "0.1.0"
 authors = ["Pierre Krieger <pierre.krieger1708@gmail.com>"]
 
 [dependencies]
-vulkano = "0.7"
+vulkano = "0.7.1"
 vulkano-shader-derive = "0.7"
 vulkano-win = "0.7"
 cgmath = "0.14.1"
@@ -15,6 +15,10 @@ time = "0.1.37"
 [[bin]]
 name = "deferred"
 path = "deferred/main.rs"
+
+[[bin]]
+name = "msaa-renderpass"
+path = "msaa-renderpass/main.rs"
 
 [[bin]]
 name = "triangle"
