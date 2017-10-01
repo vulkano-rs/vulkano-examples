@@ -43,7 +43,6 @@ use vulkano::sync::GpuFuture;
 use vulkano::sync::now;
 
 use cgmath::Matrix4;
-use cgmath::SquareMatrix;
 
 use std::fs::File;
 use std::io::BufReader;
@@ -292,12 +291,12 @@ impl GltfModel {
                 .expect("failed to create shader module");
 
             let mut meshes = Vec::new();
-            for (mesh_id, mesh) in gltf.as_json().meshes.iter().enumerate() {
-                let mut mesh_prim_out = Vec::with_capacity(mesh.primitives.len());
-                for (primitive_id, primitive) in mesh.primitives.iter().enumerate() {
+            for mesh in gltf.meshes() {
+                let mut mesh_prim_out = Vec::with_capacity(mesh.primitives().len());
+                for primitive in mesh.primitives() {
                     // We build a `RuntimeVertexDef` that analyzes the primitive definition and
                     // builds the link between the vertex shader input and the glTF vertex buffers.
-                    let runtime_def = RuntimeVertexDef::from_primitive(gltf.as_json(), mesh_id, primitive_id);
+                    let runtime_def = RuntimeVertexDef::from_primitive(primitive.clone());
 
                     // This `runtime_def` generates the list of vertex buffers that must be bound
                     // when drawing, as a list of glTF buffer ids and their offsets.
@@ -314,33 +313,36 @@ impl GltfModel {
                     // Similarly, if the primitive indicates that it uses an index buffer we
                     // immediately generate an `index_buffer` variable which we will later be
                     // able to pass to `draw_indexed`.
-                    let index_buffer = if let Some(indices) = primitive.indices.as_ref().map(|i| i.value()) {
-                        let accessor = &gltf.as_json().accessors[indices];
-                        let view = &gltf.as_json().buffer_views[accessor.buffer_view.value()];
-                        let total_offset = accessor.byte_offset as usize + view.byte_offset as usize;
-                        let index_buffer = gltf_buffers[view.buffer.value()].clone();
+                    let index_buffer = if let Some(accessor) = primitive.indices() {
+                        let view = accessor.view();
+                        let total_offset = accessor.offset() + view.offset();
+                        let index_buffer = gltf_buffers[view.buffer().index()].clone();
                         let index_buffer_len = index_buffer.len();
                         let indices = index_buffer.into_buffer_slice().slice(total_offset..index_buffer_len).unwrap();
                         // TODO: it is not guaranteed to be u16
-                        let indices: BufferSlice<[u16], Arc<ImmutableBuffer<[u8]>>> = unsafe { ::std::mem::transmute(indices) };     // TODO: add a function in vulkano that does that
-                        let indices = indices.clone().slice(0..accessor.count as usize).unwrap();
+                        // TODO: add a function in vulkano that does that
+                        let indices: BufferSlice<[u16], Arc<ImmutableBuffer<[u8]>>> = unsafe { ::std::mem::transmute(indices) };
+                        let indices = indices.clone().slice(0..accessor.count() as usize).unwrap();
                         Some(indices)
                     } else {
                         None
                     };
 
                     // Determine the kind of primitives based on the glTF definition.
-                    let primitive_topology = match primitive.mode.clone().unwrap() {
-                        gltf::json::mesh::Mode::Points => PrimitiveTopology::PointList,
-                        gltf::json::mesh::Mode::Lines => PrimitiveTopology::LineList,
-                        gltf::json::mesh::Mode::LineLoop => panic!("LineLoop not supported"),
-                        gltf::json::mesh::Mode::LineStrip => PrimitiveTopology::LineStrip,
-                        gltf::json::mesh::Mode::Triangles => PrimitiveTopology::TriangleList,
-                        gltf::json::mesh::Mode::TriangleStrip => PrimitiveTopology::TriangleStrip,
-                        gltf::json::mesh::Mode::TriangleFan => PrimitiveTopology::TriangleFan,
+                    let primitive_topology = match primitive.mode() {
+                        gltf::mesh::Mode::Points => PrimitiveTopology::PointList,
+                        gltf::mesh::Mode::Lines => PrimitiveTopology::LineList,
+                        gltf::mesh::Mode::LineLoop => panic!("LineLoop not supported"),
+                        gltf::mesh::Mode::LineStrip => PrimitiveTopology::LineStrip,
+                        gltf::mesh::Mode::Triangles => PrimitiveTopology::TriangleList,
+                        gltf::mesh::Mode::TriangleStrip => PrimitiveTopology::TriangleStrip,
+                        gltf::mesh::Mode::TriangleFan => PrimitiveTopology::TriangleFan,
                     };
 
-                    let material_id = primitive.material.as_ref().expect("Default material not supported").value();
+                    let material_id = primitive
+                        .material()
+                        .index()
+                        .expect("Default material not supported");
 
                     // TODO: adjust some pipeline params based on material
                     // TODO: pass pipeline_layout to the builder
@@ -388,8 +390,8 @@ impl GltfModel {
     pub fn draw_default_scene(&self, viewport_dimensions: [u32; 2],
                               builder: AutoCommandBufferBuilder) -> AutoCommandBufferBuilder
     {
-        if let Some(ref scene) = self.gltf.as_json().scene {
-            self.draw_scene(scene.value(), viewport_dimensions, builder)
+        if let Some(scene) = self.gltf.default_scene() {
+            self.draw_scene(scene.index(), viewport_dimensions, builder)
         } else {
             builder
         }
@@ -404,9 +406,15 @@ impl GltfModel {
     pub fn draw_scene(&self, scene_id: usize, viewport_dimensions: [u32; 2],
                       mut builder: AutoCommandBufferBuilder) -> AutoCommandBufferBuilder
     {
-        for node in self.gltf.as_json().scenes[scene_id].nodes.iter() {
-            builder = self.draw_node(node.value(), Matrix4::identity(), viewport_dimensions,
-                                     builder);
+        let scene = self.gltf.scenes().nth(scene_id).unwrap();
+        for node in scene.nodes() {
+            let world_to_framebuffer = Matrix4::new(
+                1.0, 0.0, 0.0, 0.0,
+                0.0, -1.0, 0.0, 0.0,
+                0.0, 0.0, 0.5, 0.0,
+                0.0, 0.0, 0.5, 1.0,
+            );
+            builder = self.draw_node(node.index(), world_to_framebuffer, viewport_dimensions, builder);
         }
 
         builder
@@ -422,26 +430,15 @@ impl GltfModel {
                  viewport_dimensions: [u32; 2], mut builder: AutoCommandBufferBuilder)
                  -> AutoCommandBufferBuilder
     {
-        let node = &self.gltf.as_json().nodes[node_id];
+        let node = self.gltf.nodes().nth(node_id).unwrap();
+        let local_matrix = world_to_framebuffer * Matrix4::from(node.transform().matrix());
 
-        let local_matrix = world_to_framebuffer * {
-            let m = node.matrix;
-            Matrix4::new(m[ 0], m[ 1], m[ 2], m[ 3],
-                         m[ 4], m[ 5], m[ 6], m[ 7],
-                         m[ 8], m[ 9], m[10], m[11],
-                         m[12], m[13], m[14], m[15])
-        };
-
-        // TODO: handle TSR correctly
-
-        if let Some(ref mesh) = node.mesh {
-            builder = self.draw_mesh(mesh.value(), local_matrix, viewport_dimensions, builder);
+        if let Some(mesh) = node.mesh() {
+            builder = self.draw_mesh(mesh.index(), local_matrix, viewport_dimensions, builder);
         }
 
-        if let Some(ref children) = node.children {
-            for child in children {
-                builder = self.draw_node(child.value(), local_matrix, viewport_dimensions, builder);
-            }
+        for child in node.children() {
+            builder = self.draw_node(child.index(), local_matrix, viewport_dimensions, builder);
         }
 
         builder
@@ -461,7 +458,7 @@ impl GltfModel {
             let buf = self.instance_params_upload.next(vs::ty::InstanceParams {
                 world_to_framebuffer: world_to_framebuffer.into(),
             });
-            
+
             Arc::new(PersistentDescriptorSet::start(self.pipeline_layout.clone(), 0)
                 .add_buffer(buf)
                 .unwrap()
@@ -695,57 +692,49 @@ pub struct RuntimeVertexDef {
 }
 
 impl RuntimeVertexDef {
-    pub fn from_primitive(gltf: &gltf::json::root::Root, mesh_id: usize, primitive_id: usize)
-                          -> RuntimeVertexDef
-    {
+    pub fn from_primitive(primitive: gltf::Primitive) -> RuntimeVertexDef {
+        use gltf::mesh::Attribute;
+        use gltf::accessor::{DataType, Dimensions};
+
         let mut buffers = Vec::new();
         let mut vertex_buffer_ids = Vec::new();
         let mut attributes = Vec::new();
 
         let mut num_vertices = u32::max_value();
 
-        let primitive = &gltf.meshes[mesh_id].primitives[primitive_id];
-        for (attribute_id, (attribute, accessor_id)) in primitive.attributes.iter().enumerate() {
-            let accessor = &gltf.accessors[accessor_id.value()];
-
-            if accessor.count < num_vertices {
-                num_vertices = accessor.count;
-            }
-
-            let name = match attribute.clone().unwrap() {
-                gltf::json::mesh::Semantic::Positions => "i_position".to_owned(),
-                gltf::json::mesh::Semantic::Normals => "i_normal".to_owned(),
-                gltf::json::mesh::Semantic::Tangents => "i_tangent".to_owned(),
-                gltf::json::mesh::Semantic::Colors(0) => "i_color_0".to_owned(),
-                gltf::json::mesh::Semantic::TexCoords(0) => "i_texcoord_0".to_owned(),
-                gltf::json::mesh::Semantic::TexCoords(1) => "i_texcoord_1".to_owned(),
-                gltf::json::mesh::Semantic::Joints(0) => "i_joints_0".to_owned(),
-                gltf::json::mesh::Semantic::Weights(0) => "i_weights_0".to_owned(),
-                _ => unimplemented!()
+        for (attribute_id, attribute) in primitive.attributes().enumerate() {
+            let (name, accessor) = match attribute.clone() {
+                Attribute::Positions(accessor) => ("i_position".to_owned(), accessor),
+                Attribute::Normals(accessor) => ("i_normal".to_owned(), accessor),
+                Attribute::Tangents(accessor) => ("i_tangent".to_owned(), accessor),
+                Attribute::Colors(0, accessor) => ("i_color_0".to_owned(), accessor),
+                Attribute::TexCoords(0, accessor) => ("i_texcoord_0".to_owned(), accessor),
+                Attribute::TexCoords(1, accessor) => ("i_texcoord_1".to_owned(), accessor),
+                Attribute::Joints(0, accessor) => ("i_joints_0".to_owned(), accessor),
+                Attribute::Weights(0, accessor) => ("i_weights_0".to_owned(), accessor),
+                _ => unimplemented!(),
             };
+
+            if (accessor.count() as u32) < num_vertices {
+                num_vertices = accessor.count() as u32;
+            }
 
             let infos = AttributeInfo {
                 offset: 0,
-                format: match (accessor.component_type.unwrap().0, accessor.type_.unwrap()) {
-                    (gltf::json::accessor::ComponentType::I8,
-                     gltf::json::accessor::Type::Scalar) => Format::R8Snorm,
-                    (gltf::json::accessor::ComponentType::U8,
-                     gltf::json::accessor::Type::Scalar) => Format::R8Unorm,
-                    (gltf::json::accessor::ComponentType::F32,
-                     gltf::json::accessor::Type::Vec2) => Format::R32G32Sfloat,
-                    (gltf::json::accessor::ComponentType::F32,
-                     gltf::json::accessor::Type::Vec3) => Format::R32G32B32Sfloat,
-                    (gltf::json::accessor::ComponentType::F32,
-                     gltf::json::accessor::Type::Vec4) => Format::R32G32B32A32Sfloat,
+                format: match (accessor.data_type(), accessor.dimensions()) {
+                    (DataType::I8, Dimensions::Scalar) => Format::R8Snorm,
+                    (DataType::U8, Dimensions::Scalar) => Format::R8Unorm,
+                    (DataType::F32, Dimensions::Vec2) => Format::R32G32Sfloat,
+                    (DataType::F32, Dimensions::Vec3) => Format::R32G32B32Sfloat,
+                    (DataType::F32, Dimensions::Vec4) => Format::R32G32B32A32Sfloat,
                     _ => unimplemented!()
                 },
             };
 
-            let view = &gltf.buffer_views[accessor.buffer_view.value()];
-
-            buffers.push((attribute_id as u32, view.byte_stride.unwrap().0 as usize, InputRate::Vertex));
+            let view = accessor.view();
+            buffers.push((attribute_id as u32, view.stride().unwrap_or(accessor.size()), InputRate::Vertex));
             attributes.push((name, attribute_id as u32, infos));
-            vertex_buffer_ids.push((view.buffer.value(), view.byte_offset as usize + accessor.byte_offset as usize));
+            vertex_buffer_ids.push((view.buffer().index(), view.offset() + accessor.offset()));
         }
 
         RuntimeVertexDef {
