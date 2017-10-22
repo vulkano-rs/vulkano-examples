@@ -335,7 +335,7 @@ impl<'a> Frame<'a> {
                     self.command_buffer
                         .take()
                         .unwrap()
-                        .next_subpass(false)
+                        .next_subpass(true)
                         .unwrap()
                 );
 
