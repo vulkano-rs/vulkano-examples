@@ -216,7 +216,7 @@ impl GltfModel {
             // Vulkano doesn't allow us to bind *nothing* in a descriptor, so we create a dummy
             // texture and a dummy sampler to use when a texture or a sampler is missing.
             let dummy_sampler = Sampler::simple_repeat_linear(queue.device().clone());
-            let (dummy_texture, _) = 
+            let (dummy_texture, _) =
                     ImmutableImage::from_iter([0u8].iter().cloned(),
                                             Dimensions::Dim2d { width: 1, height: 1 },
                                             Format::R8Unorm, queue.clone())
@@ -260,9 +260,9 @@ impl GltfModel {
                     .unwrap_or((dummy_texture.clone(), dummy_sampler.clone()));
 
                 // Building the descriptor set with all the things we built above.
-                let descriptor_set = 
+                let descriptor_set =
                     Arc::new(PersistentDescriptorSet::start(pipeline_layout.clone(), 1)
-                        .add_buffer(material_params)
+                        .add_buffer(material_params.unwrap())
                         .unwrap()
                         .add_sampled_image(base_color.0, base_color.1)
                         .unwrap()
@@ -460,7 +460,7 @@ impl GltfModel {
             });
 
             Arc::new(PersistentDescriptorSet::start(self.pipeline_layout.clone(), 0)
-                .add_buffer(buf)
+                .add_buffer(buf.unwrap())
                 .unwrap()
                 .build()
                 .unwrap())
@@ -606,7 +606,7 @@ void main() {
 
 
     // Complex maths here.
-    
+
     vec3 n = v_normal;      // TODO:
 
     vec3 v = normalize(u_Camera - v_position);
@@ -622,7 +622,7 @@ void main() {
 
     vec3 diffuse_color = mix(base_color.rgb * (1 - 0.04), vec3(0.0), metallic);
     vec3 specular_color = mix(vec3(0.04), base_color.rgb, metallic);
-    
+
     float reflectance = max(max(specular_color.r, specular_color.g), specular_color.b);
     vec3 specular_environment_r90 = vec3(1.0, 1.0, 1.0) * clamp(reflectance * 25.0, 0.0, 1.0);
     float alpha_roughness = perceptual_roughness * perceptual_roughness;
@@ -693,7 +693,7 @@ pub struct RuntimeVertexDef {
 
 impl RuntimeVertexDef {
     pub fn from_primitive(primitive: gltf::Primitive) -> RuntimeVertexDef {
-        use gltf::mesh::Attribute;
+        use gltf::mesh::Semantic;
         use gltf::accessor::{DataType, Dimensions};
 
         let mut buffers = Vec::new();
@@ -704,14 +704,14 @@ impl RuntimeVertexDef {
 
         for (attribute_id, attribute) in primitive.attributes().enumerate() {
             let (name, accessor) = match attribute.clone() {
-                Attribute::Positions(accessor) => ("i_position".to_owned(), accessor),
-                Attribute::Normals(accessor) => ("i_normal".to_owned(), accessor),
-                Attribute::Tangents(accessor) => ("i_tangent".to_owned(), accessor),
-                Attribute::Colors(0, accessor) => ("i_color_0".to_owned(), accessor),
-                Attribute::TexCoords(0, accessor) => ("i_texcoord_0".to_owned(), accessor),
-                Attribute::TexCoords(1, accessor) => ("i_texcoord_1".to_owned(), accessor),
-                Attribute::Joints(0, accessor) => ("i_joints_0".to_owned(), accessor),
-                Attribute::Weights(0, accessor) => ("i_weights_0".to_owned(), accessor),
+                (Semantic::Positions, accessor) => ("i_position".to_owned(), accessor),
+                (Semantic::Normals, accessor) => ("i_normal".to_owned(), accessor),
+                (Semantic::Tangents, accessor) => ("i_tangent".to_owned(), accessor),
+                (Semantic::Colors(0), accessor) => ("i_color_0".to_owned(), accessor),
+                (Semantic::TexCoords(0), accessor) => ("i_texcoord_0".to_owned(), accessor),
+                (Semantic::TexCoords(1), accessor) => ("i_texcoord_1".to_owned(), accessor),
+                (Semantic::Joints(0), accessor) => ("i_joints_0".to_owned(), accessor),
+                (Semantic::Weights(0), accessor) => ("i_weights_0".to_owned(), accessor),
                 _ => unimplemented!(),
             };
 
@@ -757,7 +757,7 @@ unsafe impl<I> VertexDefinition<I> for RuntimeVertexDef
 {
     type BuffersIter = VecIntoIter<(u32, usize, InputRate)>;
     type AttribsIter = VecIntoIter<(u32, u32, AttributeInfo)>;
-    
+
     fn definition(&self, interface: &I)
             -> Result<(Self::BuffersIter, Self::AttribsIter), IncompatibleVertexDefinitionError>
     {

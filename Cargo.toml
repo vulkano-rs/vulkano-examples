@@ -4,15 +4,15 @@ version = "0.1.0"
 authors = ["Pierre Krieger <pierre.krieger1708@gmail.com>"]
 
 [dependencies]
-vulkano = "0.6.2"
-vulkano-shader-derive = "0.6.2"
-vulkano-win = "0.6.2"
-cgmath = "0.14.1"
-gltf = "0.9.2"
-gltf-importer = "0.9.2"
-image = "0.14.0"
-winit = "0.7.0"
-time = "0.1.37"
+vulkano = "0.8"
+vulkano-shader-derive = "0.8"
+vulkano-win = "0.8"
+cgmath = "0.16"
+gltf = "0.10"
+gltf-importer = "0.10"
+image = "0.18"
+winit = "0.7"
+time = "0.1"
 
 [[bin]]
 name = "gltf"
