@@ -81,7 +81,7 @@ fn main() {
                          .expect("failed to get surface capabilities");
         let alpha = caps.supported_composite_alpha.iter().next().unwrap();
         let format = caps.supported_formats[0].0;
-        let dims = surface.window().get_inner_size_pixels().unwrap();
+        let dims = surface.window().get_inner_size().unwrap();
         Swapchain::new(device.clone(), surface.clone(), caps.min_image_count, format,
                        [dims.0, dims.1], 1, caps.supported_usage_flags, &queue,
                        SurfaceTransform::Identity, alpha, PresentMode::Fifo, true,
@@ -125,7 +125,7 @@ fn main() {
         previous_frame_end.cleanup_finished();
 
         let dimensions = {
-            let (new_width, new_height) = surface.window().get_inner_size_pixels().unwrap();
+            let (new_width, new_height) = surface.window().get_inner_size().unwrap();
             [new_width, new_height]
         };
 

@@ -240,7 +240,7 @@ impl GltfModel {
                     emissive_texture_tex_coord: mat.emissive_texture().map(|t| t.tex_coord() as i32).unwrap_or(-1),
                     emissive_factor: mat.emissive_factor(),
                     _dummy0: [0; 12],
-                });
+                }).unwrap();
 
                 // Create the textures and samplers based on the glTF definition.
                 let base_color = pbr.base_color_texture()
@@ -262,7 +262,7 @@ impl GltfModel {
                 // Building the descriptor set with all the things we built above.
                 let descriptor_set =
                     Arc::new(PersistentDescriptorSet::start(pipeline_layout.clone(), 1)
-                        .add_buffer(material_params.unwrap())
+                        .add_buffer(material_params)
                         .unwrap()
                         .add_sampled_image(base_color.0, base_color.1)
                         .unwrap()
@@ -457,10 +457,10 @@ impl GltfModel {
         let instance_params = {
             let buf = self.instance_params_upload.next(vs::ty::InstanceParams {
                 world_to_framebuffer: world_to_framebuffer.into(),
-            });
+            }).unwrap();
 
             Arc::new(PersistentDescriptorSet::start(self.pipeline_layout.clone(), 0)
-                .add_buffer(buf.unwrap())
+                .add_buffer(buf)
                 .unwrap()
                 .build()
                 .unwrap())
