@@ -4,14 +4,14 @@ version = "0.1.0"
 authors = ["Pierre Krieger <pierre.krieger1708@gmail.com>"]
 
 [dependencies]
-vulkano = "0.8"
-vulkano-shader-derive = "0.8"
-vulkano-win = "0.8"
+vulkano = "0.9"
+vulkano-shader-derive = "0.9"
+vulkano-win = "0.9"
 cgmath = "0.16"
 gltf = "0.10"
 gltf-importer = "0.10"
 image = "0.18"
-winit = "0.7"
+winit = "0.11"
 time = "0.1"
 
 [[bin]]
