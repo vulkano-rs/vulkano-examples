@@ -69,12 +69,12 @@ fn main() {
     let window = winit::WindowBuilder::new().build_vk_surface(&events_loop, instance.clone()).unwrap();
 
     let dimensions = {
-        let (width, height) = window.window().get_inner_size_pixels().unwrap();
+        let (width, height) = window.window().get_inner_size().unwrap();
         [width, height]
     };
 
     let queue = physical.queue_families().find(|&q| {
-        q.supports_graphics() && window.surface().is_supported(q).unwrap_or(false)
+        q.supports_graphics() && window.is_supported(q).unwrap_or(false)
     }).expect("couldn't find a graphical queue family");
 
     let (device, mut queues) = {
@@ -90,11 +90,11 @@ fn main() {
     let queue = queues.next().unwrap();
 
     let (mut swapchain, mut images) = {
-        let caps = window.surface().capabilities(physical)
+        let caps = window.capabilities(physical)
                          .expect("failed to get surface capabilities");
         let alpha = caps.supported_composite_alpha.iter().next().unwrap();
         let format = caps.supported_formats[0].0;
-        Swapchain::new(device.clone(), window.surface().clone(), caps.min_image_count, format,
+        Swapchain::new(device.clone(), window.clone(), caps.min_image_count, format,
                        dimensions, 1, caps.supported_usage_flags, &queue,
                        SurfaceTransform::Identity, alpha, PresentMode::Fifo, true,
                        None).expect("failed to create swapchain")
@@ -114,7 +114,7 @@ fn main() {
 
         if recreate_swapchain {
             let dimensions = {
-                let (new_width, new_height) = window.window().get_inner_size_pixels().unwrap();
+                let (new_width, new_height) = window.window().get_inner_size().unwrap();
                 [new_width, new_height]
             };
             
