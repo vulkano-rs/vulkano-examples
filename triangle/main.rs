@@ -94,15 +94,14 @@ fn main() {
 
 
     // The objective of this example is to draw a triangle on a window. To do so, we first need to
-    // create the window.
+    // create a surface that is wrapped in a window.
     //
-    // This is done by creating a `WindowBuilder` from the `winit` crate, then calling the
-    // `build_vk_surface` method provided by the `VkSurfaceBuild` trait from `vulkano_win`. If you
-    // ever get an error about `build_vk_surface` being undefined in one of your projects, this
+    // This is done by creating a WindowBuilder from the winit crate, then calling the
+    // build_vk_surface method provided by the VkSurfaceBuild trait from vulkano_win. If you
+    // ever get an error about build_vk_surface being undefined in one of your projects, this
     // probably means that you forgot to import this trait.
     //
-    // This returns a `vulkano_win::Window` object that contains both a cross-platform winit
-    // window and a cross-platform Vulkan surface that represents the surface of the window.
+    // This returns a vulkano::swapchain::Surface object wrapped in a cross-platform vulkano-winit window.
     let mut events_loop = winit::EventsLoop::new();
     let window = winit::WindowBuilder::new().build_vk_surface(&events_loop, instance.clone()).unwrap();
 
@@ -169,7 +168,7 @@ fn main() {
         // Querying the capabilities of the surface. When we create the swapchain we can only
         // pass values that are allowed by the capabilities.
         let caps = window.capabilities(physical)
-                         .expect("failed to get surface capabilities");
+                          .expect("failed to get surface capabilities");
 
         // We choose the dimensions of the swapchain to match the current dimensions of the window.
         // If `caps.current_extent` is `None`, this means that the window size will be determined
