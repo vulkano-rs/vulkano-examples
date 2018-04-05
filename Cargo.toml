@@ -21,10 +21,6 @@ name = "msaa-renderpass"
 path = "msaa-renderpass/main.rs"
 
 [[bin]]
-name = "persistence"
-path = "persistence/main.rs"
-
-[[bin]]
 name = "bloom"
 path = "bloom/main.rs"
 

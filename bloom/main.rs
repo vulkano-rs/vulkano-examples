@@ -10,10 +10,14 @@
 /*
 
 TODO:
-- sampling
-- HDR textures
-- optimize blur kernel
-
+- Comments!
+- Add a more visually plasing scene
+- Refactor (this file is a bit too long)
+- HDR image formats
+- Optimizations
+    - some things can maybe be done in subpasses
+    - can we reuse some images? (vulkano currently protests very much against this)
+        * reusing would also make it possible to repeat the blurring process
 */
 
 #[macro_use]
@@ -56,7 +60,6 @@ use vulkano::{
     image::{
         ImageUsage,
         AttachmentImage,
-        ImageLayout,
     },
     sampler::Sampler,
     format::{
