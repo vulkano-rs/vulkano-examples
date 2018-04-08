@@ -178,6 +178,7 @@ fn main() {
         // The alpha mode indicates how the alpha value of the final image will behave. For example
         // you can choose whether the window will be opaque or transparent.
         let alpha = caps.supported_composite_alpha.iter().next().unwrap();
+        dimensions = caps.current_extent.unwrap_or(dimensions);
 
         // Choosing the internal format that the images will have.
         let format = caps.supported_formats[0].0;
@@ -341,7 +342,7 @@ void main() {
                 let (new_width, new_height) = window.window().get_inner_size().unwrap();
                 [new_width, new_height]
             };
-            
+
             let (new_swapchain, new_images) = match swapchain.recreate_with_dimension(dimensions) {
                 Ok(r) => r,
                 // This error tends to happen when the user is manually resizing the window.
