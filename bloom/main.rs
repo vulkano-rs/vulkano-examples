@@ -249,12 +249,22 @@ fn main() {
         BufferUsage::all(),
     );
 
-    let blur_direction_uniform_buffer = {
+    let blur_direction_uniform_buffer_horizontal = {
         CpuAccessibleBuffer::from_data(
             device.clone(),
             BufferUsage::all(),
             postprocess_blur_fs_mod::ty::BlurDirection {
                 direction: [1, 0],
+            }
+        ).expect("failed to create buffer")
+    };
+
+    let blur_direction_uniform_buffer_vertical = {
+        CpuAccessibleBuffer::from_data(
+            device.clone(),
+            BufferUsage::all(),
+            postprocess_blur_fs_mod::ty::BlurDirection {
+                direction: [0, 1],
             }
         ).expect("failed to create buffer")
     };
@@ -508,7 +518,7 @@ fn main() {
         PersistentDescriptorSet::start(postprocess_blur_ping_pipeline.clone(), 0)
             .add_sampled_image(sep_attachment.clone(), sampler.clone())
             .unwrap()
-            .add_buffer(blur_direction_uniform_buffer.clone())
+            .add_buffer(blur_direction_uniform_buffer_horizontal.clone())
             .unwrap()
             .add_buffer(blur_kernel_uniform_buffer.clone())
             .unwrap()
@@ -521,7 +531,7 @@ fn main() {
         PersistentDescriptorSet::start(postprocess_blur_pong_pipeline.clone(), 0)
             .add_sampled_image(ping_attachment.clone(), sampler.clone())
             .unwrap()
-            .add_buffer(blur_direction_uniform_buffer.clone())
+            .add_buffer(blur_direction_uniform_buffer_vertical.clone())
             .unwrap()
             .add_buffer(blur_kernel_uniform_buffer.clone())
             .unwrap()
