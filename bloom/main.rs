@@ -10,15 +10,96 @@
 /*
 
 TODO:
-- Comments!
+- Code Comments!
 - Add a more visually plasing scene
 - Refactor (this file is a bit too long)
 - HDR image formats
+- Do not call the last step "tonemap", as we do not use HDR attachments
 - Optimizations
+    - subpixel sampling with stride 2
     - some things can maybe be done in subpasses
     - can we reuse some images? (vulkano currently protests very much against this)
         * reusing would also make it possible to repeat the blurring process
 */
+
+//! Bloom example, using multiple renderpasses
+//!
+//! # Introduction to Bloom
+//!
+//! Bloom (also called glow) is a postprocessing technique used to convey that
+//! some objects in the rendered scene are really bright. Imagine a scene with
+//! light sources. In classical rendering, the lights can be rendered using
+//! its color or a brighter variant, but there is only so much that can be
+//! done, as we cannot exceed white color. Bloom makes the color of bright
+//! objects bleed out of their frame, adding a psychological effect of
+//! brightness.
+//!
+//! # Implementing Bloom
+//!
+//! Bloom happens in the screenspace, and usually requires at lest 3-4
+//! rendering passes. Conceptually, the following happens:
+//!     1.  Scene is rendered to an image
+//!     2.  Bright colors are separated from the rendered scene to its own image
+//!     3.  Separated highlights are blurred
+//!     4.  Blurred highlights are merged back to the original image.
+//!
+//! Note that steps 1. and 2. can be merged in one using multiple render targets
+//! for optimization.
+//!
+//! ## Separation Pass
+//!
+//! During separation, we copy bright pixels from one image to another. We
+//! usually select the pixel based on brightness (eg. if grayscale
+//! brightness exceeds a threshold). If needed, the pixels can also be picked
+//! by beloging to a certain object (eg. only blur pixels coming from light
+//! sources, but not other bright surfaces), but this requires additional
+//! information to be passed.
+//!
+//! ## Blur Passes
+//!
+//! Once we have the image containing the bright areas, we can perform gaussian
+//! blur on it. This is done by convoluting a gaussian kernel on the image's pixels.
+//!
+//! When applying this 3x3 gaussian kernel to a pixel, its value will be the its
+//! original value multiplied by the kernel's middle cell, summed with the kernel's
+//! outer cells multiplied with their corresponding pixels in our image.
+//!
+//! 0.077847	0.123317	0.077847
+//! 0.123317	0.195346	0.123317
+//! 0.077847	0.123317	0.077847
+//!
+//! This gaussian kernel is already normalized, meaning its cells sum up to one,
+//! so we don't end up with brighter pixels than we previously had. Note, that
+//! for this 3x3 kernel we will need to perform 9 texture sample operations.
+//!
+//! To optimize, we can use 1d kernels instead of 2d, and blur in multiple render
+//! passes (eg first horizontally, then vertically).
+//! This reduces the number of sample operations from N ^ 2 to 2 * N, and is
+//! a significant speedup for larger blur kernels.
+//!
+//! To achieve the right visual result, we can apply the pairs of blur passes
+//! multiple times.
+//!
+//! ## Merge Pass
+//!
+//! In the final pass, we merge the blurred highlights back with the original
+//! image. Bloom can sometimes be implemented together with HDR, but HDR itself
+//! is not necessary, it only complements the bloom effect nicely. If we used HDR,
+//! we would also apply tonemapping and gamma correcting here.
+//!
+//! # Optimizations
+//!
+//! Besides using 1d kernels for blur, we can also do the following.
+//!
+//! Use a fraction of the screen resolution for the blur images. Since we sample
+//! the images anyway, they do not need to be the same size. This effectively
+//! reduces the number of fragment shader runs. The resolution can easily be
+//! halved before any visual degradation of output.
+//!
+//! Another optimization is sampling between two pixels and strinding
+//! two pixels at once when blurring. This increases the blur's reach, and we
+//! may potentially use a lesser number of passes achieve the same visual result.
+//!
 
 #[macro_use]
 extern crate vulkano;
@@ -38,55 +119,34 @@ use winit::{EventsLoop, WindowBuilder, Event, WindowEvent};
 
 use vulkano_win::VkSurfaceBuild;
 
-use vulkano::{
-    instance::{
-        Instance,
-        PhysicalDevice,
-    },
-    device::{
-        Device,
-        DeviceExtensions,
-    },
-    buffer::{
-        BufferUsage,
-        CpuAccessibleBuffer,
-        CpuBufferPool,
-    },
-    command_buffer::{
-        AutoCommandBufferBuilder,
-        DynamicState,
-    },
-    descriptor::descriptor_set::PersistentDescriptorSet,
-    image::{
-        ImageUsage,
-        AttachmentImage,
-    },
-    sampler::Sampler,
-    format::{
-        Format,
-        ClearValue,
-    },
-    framebuffer::{
-        Framebuffer,
-        Subpass,
-    },
-    pipeline::{
-        GraphicsPipeline,
-        viewport::Viewport,
-    },
-    swapchain::{
-        self,
-        PresentMode,
-        SurfaceTransform,
-        Swapchain,
-        AcquireError,
-        SwapchainCreationError,
-    },
-    sync::{
-        self as vk_sync,
-        GpuFuture,
-    }
-};
+use vulkano::instance::Instance;
+use vulkano::instance::PhysicalDevice;
+use vulkano::device::Device;
+use vulkano::device::DeviceExtensions;
+use vulkano::buffer::BufferUsage;
+use vulkano::buffer::CpuAccessibleBuffer;
+use vulkano::buffer::CpuBufferPool;
+use vulkano::command_buffer::AutoCommandBufferBuilder;
+use vulkano::command_buffer::DynamicState;
+use vulkano::descriptor::descriptor_set::PersistentDescriptorSet;
+use vulkano::image::ImageUsage;
+use vulkano::image::AttachmentImage;
+use vulkano::sampler::Sampler;
+use vulkano::format::Format;
+use vulkano::format::ClearValue;
+use vulkano::framebuffer::Framebuffer;
+use vulkano::framebuffer::Subpass;
+use vulkano::pipeline::GraphicsPipeline;
+use vulkano::pipeline::viewport::Viewport;
+use vulkano::swapchain;
+use vulkano::swapchain::Swapchain;
+use vulkano::swapchain::PresentMode;
+use vulkano::swapchain::SurfaceTransform;
+use vulkano::swapchain::AcquireError;
+use vulkano::swapchain::SwapchainCreationError;
+use vulkano::sync as vk_sync;
+use vulkano::sync::GpuFuture;
+
 
 fn main() {
     let instance = {
