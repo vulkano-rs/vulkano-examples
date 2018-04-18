@@ -113,7 +113,7 @@ use std::sync::Arc;
 use std::mem;
 use std::time::Instant;
 
-use cgmath::{Rad, Point3, Vector3, Matrix3, Matrix4};
+use cgmath::{Rad, Point3, Vector3, Matrix4};
 
 use winit::{EventsLoop, WindowBuilder, Event, WindowEvent};
 
@@ -147,6 +147,7 @@ use vulkano::swapchain::SwapchainCreationError;
 use vulkano::sync as vk_sync;
 use vulkano::sync::GpuFuture;
 
+mod cube;
 
 fn main() {
     let instance = {
@@ -280,17 +281,23 @@ fn main() {
         },
     ).expect("failed to create attachment image");
 
-    let scene_vertex_buffer = {
-        #[derive(Debug, Clone)]
-        struct Vertex { a_position: [f32; 2] }
-        impl_vertex!(Vertex, a_position);
+    let scene_vertex_buffer = CpuAccessibleBuffer::from_iter(
+        device.clone(),
+        BufferUsage::all(),
+        cube::VERTICES.iter().cloned(),
+    ).expect("failed to create buffer");
 
-        CpuAccessibleBuffer::from_iter(device.clone(), BufferUsage::all(), [
-            Vertex { a_position: [-0.5, -0.25] },
-            Vertex { a_position: [0.0, 0.5] },
-            Vertex { a_position: [0.25, -0.1] },
-        ].iter().cloned()).expect("failed to create buffer")
-    };
+    let scene_uv_buffer = CpuAccessibleBuffer::from_iter(
+        device.clone(),
+        BufferUsage::all(),
+        cube::UVS.iter().cloned(),
+    ).expect("failed to create buffer");
+
+    let scene_index_buffer = CpuAccessibleBuffer::from_iter(
+        device.clone(),
+        BufferUsage::all(),
+        cube::INDICES.iter().cloned(),
+    ).expect("failed to create buffer");
 
     let postprocess_vertex_buffer = {
         #[derive(Debug, Clone)]
@@ -305,6 +312,11 @@ fn main() {
     };
 
     let matrix_uniform_buffer = CpuBufferPool::<scene_vs_mod::ty::Matrices>::new(
+        device.clone(),
+        BufferUsage::all(),
+    );
+
+    let material_uniform_buffer = CpuBufferPool::<scene_fs_mod::ty::Material>::new(
         device.clone(),
         BufferUsage::all(),
     );
@@ -346,17 +358,17 @@ fn main() {
         ).expect("failed to create buffer")
     };
 
-    let proj = cgmath::perspective(
+    let proj_matrix = cgmath::perspective(
         Rad(std::f32::consts::FRAC_PI_2),
         { dimensions[0] as f32 / dimensions[1] as f32 },
         0.01,
         100.0,
     );
 
-    let view = Matrix4::look_at(
-        Point3::new(0.3, 0.3, 1.0),
+    let view_matrix = Matrix4::look_at(
+        Point3::new(-2.0, -2.0, 5.0),
         Point3::new(0.0, 0.0, 0.0),
-        Vector3::new(0.0, -1.0, 0.0),
+        Vector3::new(0.0, 1.0, 0.0),
     );
 
     let scene_vs = scene_vs_mod::Shader::load(device.clone())
@@ -497,11 +509,12 @@ fn main() {
 
     let scene_pipeline = Arc::new({
         GraphicsPipeline::start()
-            .vertex_input_single_buffer()
+            .vertex_input(vulkano::pipeline::vertex::TwoBuffersDefinition::new())
             .vertex_shader(scene_vs.main_entry_point(), ())
             .triangle_list()
             .viewports_dynamic_scissors_irrelevant(1)
             .fragment_shader(scene_fs.main_entry_point(), ())
+            .depth_stencil_simple_depth()
             .render_pass(Subpass::from(scene_renderpass.clone(), 0).unwrap())
             .build(device.clone())
             .unwrap()
@@ -658,24 +671,30 @@ fn main() {
             Err(err) => panic!("{:?}", err),
         };
 
-        let matrix_uniform_buffer_subbuffer = {
+        let (matrix_uniform_subbuffer, material_uniform_subbuffer) = {
             let elapsed = time_start.elapsed();
-            let rotation_factor = elapsed.as_secs() as f64
+
+            let factor = elapsed.as_secs() as f64
                 + elapsed.subsec_nanos() as f64 * 1e-9;
-            let rotation = Matrix3::from_angle_z(Rad(rotation_factor as f32));
-
-            let uniform_data = scene_vs_mod::ty::Matrices {
-                model: Matrix4::from(rotation).into(),
-                view: view.into(),
-                proj: proj.into(),
+            let matrix_data = scene_vs_mod::ty::Matrices {
+                model: Matrix4::from_angle_y(Rad(factor as f32)).into(),
+                view: view_matrix.into(),
+                proj: proj_matrix.into(),
             };
+            let matrix_subbuffer = matrix_uniform_buffer.next(matrix_data).unwrap();
 
-            matrix_uniform_buffer.next(uniform_data).unwrap()
+            let material_data = scene_fs_mod::ty::Material {
+                glow_strength: 10.0 * (factor.sin() + 1.0) as f32,
+            };
+            let material_subbuffer = material_uniform_buffer.next(material_data).unwrap();
+
+            (matrix_subbuffer, material_subbuffer)
         };
 
         let scene_set = Arc::new({
             PersistentDescriptorSet::start(scene_pipeline.clone(), 0)
-                .add_buffer(matrix_uniform_buffer_subbuffer).unwrap()
+                .add_buffer(matrix_uniform_subbuffer).unwrap()
+                .add_buffer(material_uniform_subbuffer).unwrap()
                 .build().unwrap()
         });
 
@@ -715,10 +734,11 @@ fn main() {
                 ],
             )
             .unwrap()
-            .draw(
+            .draw_indexed(
                 scene_pipeline.clone(),
                 scene_dynamic_state.clone(),
-                scene_vertex_buffer.clone(),
+                (scene_vertex_buffer.clone(), scene_uv_buffer.clone()),
+                scene_index_buffer.clone(),
                 scene_set.clone(),
                 (),
             )
@@ -834,19 +854,23 @@ mod scene_vs_mod {
     #[src = "
 #version 450
 
-layout(set = 0, binding = 0) uniform Matrices {
+layout (set = 0, binding = 0) uniform Matrices {
     mat4 model;
     mat4 view;
     mat4 proj;
 } u_matrices;
 
-layout(location = 0) in vec2 a_position;
+layout (location = 0) in vec3 a_position;
+layout (location = 1) in vec2 a_uv;
+
+layout (location = 0) out vec2 v_uv;
 
 void main() {
+    v_uv = a_uv;
     gl_Position = u_matrices.proj
         * u_matrices.view
         * u_matrices.model
-        * vec4(a_position, 0.0, 1.0);
+        * vec4(a_position, 1.0);
 }
 "]
     struct Dummy;
@@ -859,10 +883,24 @@ mod scene_fs_mod {
     #[src = "
 #version 450
 
-layout(location = 0) out vec4 f_color;
+layout (set = 0, binding = 1) uniform Material {
+    float glow_strength;
+} u_material;
+
+layout (location = 0) in vec2 v_uv;
+
+layout (location = 0) out vec4 f_color;
+
+const vec3 color = vec3(0.1, 0.475, 0.811);
+const float edge_thickness = 2.0;
+const float edge_sharpness = 30.0;
+const float edge_subtract	= 0.3;
 
 void main() {
-    f_color = vec4(0.2, 0.9, 0.9, 1.0);
+    vec2 uv = abs(v_uv - 0.5) * edge_thickness;
+    uv = pow(uv, vec2(edge_sharpness)) - edge_subtract;
+    float c = clamp(uv.x + uv.y, 0.0, 1.0) * u_material.glow_strength;
+    f_color	= vec4(color * c, 1.0);
 }
 "]
     struct Dummy;
@@ -875,10 +913,10 @@ mod postprocess_vs_mod {
     #[src = "
 #version 450
 
-layout(location = 0) in vec2 a_position;
-layout(location = 1) in vec2 a_texcoord;
+layout (location = 0) in vec2 a_position;
+layout (location = 1) in vec2 a_texcoord;
 
-layout(location = 0) out vec2 v_texcoord;
+layout (location = 0) out vec2 v_texcoord;
 
 void main() {
     v_texcoord = a_texcoord;
@@ -895,11 +933,11 @@ mod postprocess_sep_fs_mod {
     #[src = "
 #version 450
 
-layout(set = 0, binding = 0) uniform sampler2D u_image;
+layout (set = 0, binding = 0) uniform sampler2D u_image;
 
-layout(location = 0) in vec2 v_texcoord;
+layout (location = 0) in vec2 v_texcoord;
 
-layout(location = 0) out vec4 f_color;
+layout (location = 0) out vec4 f_color;
 
 void main() {
     vec4 color = texture(u_image, v_texcoord);
@@ -921,17 +959,17 @@ mod postprocess_blur_fs_mod {
 
 #define KERNEL_LENGTH 6
 
-layout(set = 0, binding = 0) uniform sampler2D u_image;
-layout(set = 0, binding = 1) uniform BlurDirection {
+layout (set = 0, binding = 0) uniform sampler2D u_image;
+layout (set = 0, binding = 1) uniform BlurDirection {
     ivec2 direction;
 } u_blur_direction;
-layout(set = 0, binding = 2) uniform BlurKernel {
+layout (set = 0, binding = 2) uniform BlurKernel {
     float[KERNEL_LENGTH] kernel;
 } u_blur_kernel;
 
-layout(location = 0) in vec2 v_texcoord;
+layout (location = 0) in vec2 v_texcoord;
 
-layout(location = 0) out vec4 f_color;
+layout (location = 0) out vec4 f_color;
 
 void main() {
     vec2 blur_direction = vec2(u_blur_direction.direction);
@@ -955,12 +993,12 @@ mod postprocess_tonemap_fs_mod {
     #[src = "
 #version 450
 
-layout(set = 0, binding = 0) uniform sampler2D u_image;
-layout(set = 0, binding = 1) uniform sampler2D u_image_blur;
+layout (set = 0, binding = 0) uniform sampler2D u_image;
+layout (set = 0, binding = 1) uniform sampler2D u_image_blur;
 
-layout(location = 0) in vec2 v_texcoord;
+layout (location = 0) in vec2 v_texcoord;
 
-layout(location = 0) out vec4 f_color;
+layout (location = 0) out vec4 f_color;
 
 void main() {
     vec3 color = texture(u_image, v_texcoord).rgb;
