@@ -11,12 +11,9 @@
 
 TODO:
 - Code Comments!
-- Add a more visually plasing scene
 - Refactor (this file is a bit too long)
 - HDR image formats
-- Do not call the last step "tonemap", as we do not use HDR attachments
 - Optimizations
-    - subpixel sampling with stride 2
     - some things can maybe be done in subpasses
     - can we reuse some images? (vulkano currently protests very much against this)
         * reusing would also make it possible to repeat the blurring process
@@ -973,12 +970,15 @@ layout (location = 0) out vec4 f_color;
 
 void main() {
     vec2 blur_direction = vec2(u_blur_direction.direction);
-    vec2 px_direction = vec2(1) / vec2(textureSize(u_image, 0)) * blur_direction;
+    vec2 two_px = blur_direction * vec2(2) / vec2(textureSize(u_image, 0));
+    vec2 half_px = two_px / 4.0;
+
     vec4 color_sum = u_blur_kernel.kernel[0] * texture(u_image, v_texcoord);
     for (int i = 1; i <= KERNEL_LENGTH; i++) {
         float k = u_blur_kernel.kernel[i];
-        color_sum += k * texture(u_image,  px_direction * vec2(i) + v_texcoord);
-        color_sum += k * texture(u_image, -px_direction * vec2(i) + v_texcoord);
+        vec2 offset = two_px * float(i) - half_px;
+        color_sum += k * texture(u_image,  offset + v_texcoord);
+        color_sum += k * texture(u_image, -offset + v_texcoord);
     }
     f_color = color_sum;
 }
