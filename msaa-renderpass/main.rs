@@ -233,7 +233,7 @@ fn main() {
                                              .expect("failed to create buffer");
 
     let command_buffer = AutoCommandBufferBuilder::primary_one_time_submit(device.clone(), queue.family()).unwrap()
-        .begin_render_pass(framebuffer.clone(), false, vec![[0.0, 0.0, 1.0, 1.0].into()])
+        .begin_render_pass(framebuffer.clone(), false, vec![[0.0, 0.0, 1.0, 1.0].into(), vulkano::format::ClearValue::None])
         .unwrap()
 
         .draw(pipeline.clone(), dynamic_state, vertex_buffer.clone(), (), ())
