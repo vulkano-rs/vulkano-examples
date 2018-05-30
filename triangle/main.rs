@@ -213,9 +213,7 @@ fn main() {
         #[ty = "vertex"]
         #[src = "
 #version 450
-
 layout(location = 0) in vec2 position;
-
 void main() {
     gl_Position = vec4(position, 0.0, 1.0);
 }
@@ -228,9 +226,7 @@ void main() {
         #[ty = "fragment"]
         #[src = "
 #version 450
-
 layout(location = 0) out vec4 f_color;
-
 void main() {
     f_color = vec4(1.0, 0.0, 0.0, 1.0);
 }
@@ -447,8 +443,22 @@ void main() {
             // present command at the end of the queue. This means that it will only be presented once
             // the GPU has finished executing the command buffer that draws the triangle.
             .then_swapchain_present(queue.clone(), swapchain.clone(), image_num)
-            .then_signal_fence_and_flush().unwrap();
-        previous_frame_end = Box::new(future) as Box<_>;
+            .then_signal_fence_and_flush();
+        //previous_frame_end = Box::new(future) as Box<_>;
+
+        match future {
+            Ok(future) => {
+                previous_frame_end = Box::new(future) as Box<_>;
+            }
+            Err(vulkano::sync::FlushError::OutOfDate) => {
+                recreate_swapchain = true;
+                previous_frame_end = Box::new(vulkano::sync::now(device.clone())) as Box<_>;
+            }
+            Err(e) => {
+                println!("{:?}", e);
+                previous_frame_end = Box::new(vulkano::sync::now(device.clone())) as Box<_>;
+            }
+        }
 
         // Note that in more complex programs it is likely that one of `acquire_next_image`,
         // `command_buffer::submit`, or `present` will block for some time. This happens when the
@@ -464,7 +474,7 @@ void main() {
         events_loop.poll_events(|ev| {
             match ev {
                 winit::Event::WindowEvent { event: winit::WindowEvent::Closed, .. } => done = true,
-                winit::Event::WindowEvent { event: winit::WindowEvent::Resized(_, _), .. } => recreate_swapchain = true,
+                //winit::Event::WindowEvent { event: winit::WindowEvent::Resized(_, _), .. } => recreate_swapchain = true,
                 _ => ()
             }
         });
