@@ -7,17 +7,6 @@
 // notice may not be copied, modified, or distributed except
 // according to those terms.
 
-/*
-
-TODO:
-- Code Comments!
-- Refactor (this file is a bit too long)
-- HDR image formats
-- Optimizations
-    - some things can maybe be done in subpasses
-    - can we reuse some images? (vulkano currently protests very much against this)
-        * reusing would also make it possible to repeat the blurring process
-*/
 
 //! Bloom example, using multiple renderpasses
 //!
@@ -105,6 +94,7 @@ extern crate vulkano_shader_derive;
 extern crate winit;
 extern crate vulkano_win;
 extern crate cgmath;
+extern crate failure;
 
 use std::sync::Arc;
 use std::mem;
@@ -144,9 +134,11 @@ use vulkano::swapchain::SwapchainCreationError;
 use vulkano::sync as vk_sync;
 use vulkano::sync::GpuFuture;
 
+use failure::Error;
+
 mod cube;
 
-fn main() {
+fn main() -> Result<(), Error> {
     let instance = {
         let extensions = vulkano_win::required_extensions();
         Instance::new(None, &extensions, None)
@@ -403,7 +395,7 @@ fn main() {
                 color: [scene_color],
                 depth_stencil: {scene_depth}
             }
-        ).unwrap()
+        )?
     });
 
     let postprocess_sep_renderpass = Arc::new({
@@ -421,7 +413,7 @@ fn main() {
                 color: [sep_color],
                 depth_stencil: {}
             }
-        ).unwrap()
+        )?
     });
 
     let postprocess_blur_ping_renderpass = Arc::new({
@@ -439,7 +431,7 @@ fn main() {
                 color: [ping_color],
                 depth_stencil: {}
             }
-        ).unwrap()
+        )?
     });
 
     let postprocess_blur_pong_renderpass = Arc::new({
@@ -457,7 +449,7 @@ fn main() {
                 color: [pong_color],
                 depth_stencil: {}
             }
-        ).unwrap()
+        )?
     });
 
     let postprocess_tonemap_renderpass = Arc::new({
@@ -475,32 +467,32 @@ fn main() {
                 color: [output_color],
                 depth_stencil: {}
             }
-        ).unwrap()
+        )?
     });
 
     let scene_framebuffer = Arc::new({
         Framebuffer::start(scene_renderpass.clone())
-            .add(scene_color_attachment.clone()).unwrap()
-            .add(scene_depth_attachment.clone()).unwrap()
-            .build().unwrap()
+            .add(scene_color_attachment.clone())?
+            .add(scene_depth_attachment.clone())?
+            .build()?
     });
 
     let sep_framebuffer = Arc::new({
         Framebuffer::start(postprocess_sep_renderpass.clone())
-            .add(sep_attachment.clone()).unwrap()
-            .build().unwrap()
+            .add(sep_attachment.clone())?
+            .build()?
     });
 
     let ping_framebuffer = Arc::new({
         Framebuffer::start(postprocess_blur_ping_renderpass.clone())
-            .add(ping_attachment.clone()).unwrap()
-            .build().unwrap()
+            .add(ping_attachment.clone())?
+            .build()?
     });
 
     let pong_framebuffer = Arc::new({
         Framebuffer::start(postprocess_blur_pong_renderpass.clone())
-            .add(pong_attachment.clone()).unwrap()
-            .build().unwrap()
+            .add(pong_attachment.clone())?
+            .build()?
     });
 
 
@@ -513,8 +505,7 @@ fn main() {
             .fragment_shader(scene_fs.main_entry_point(), ())
             .depth_stencil_simple_depth()
             .render_pass(Subpass::from(scene_renderpass.clone(), 0).unwrap())
-            .build(device.clone())
-            .unwrap()
+            .build(device.clone())?
     });
 
     let postprocess_sep_pipeline = Arc::new({
@@ -524,10 +515,8 @@ fn main() {
             .triangle_list()
             .viewports_dynamic_scissors_irrelevant(1)
             .fragment_shader(postprocess_sep_fs.main_entry_point(), ())
-            .render_pass(Subpass::from(postprocess_sep_renderpass.clone(), 0)
-            .unwrap())
-            .build(device.clone())
-            .unwrap()
+            .render_pass(Subpass::from(postprocess_sep_renderpass.clone(), 0).unwrap())
+            .build(device.clone())?
     });
 
     let postprocess_blur_ping_pipeline = Arc::new({
@@ -540,10 +529,8 @@ fn main() {
             .render_pass(Subpass::from(
                 postprocess_blur_ping_renderpass.clone(),
                 0,
-            )
-            .unwrap())
-            .build(device.clone())
-            .unwrap()
+            ).unwrap())
+            .build(device.clone())?
     });
 
     let postprocess_blur_pong_pipeline = Arc::new({
@@ -556,10 +543,8 @@ fn main() {
             .render_pass(Subpass::from(
                 postprocess_blur_pong_renderpass.clone(),
                 0,
-            )
-            .unwrap())
-            .build(device.clone())
-            .unwrap()
+            ).unwrap())
+            .build(device.clone())?
     });
 
     let postprocess_tonemap_pipeline = Arc::new({
@@ -569,57 +554,42 @@ fn main() {
             .triangle_list()
             .viewports_dynamic_scissors_irrelevant(1)
             .fragment_shader(postprocess_tonemap_fs.main_entry_point(), ())
-            .render_pass(Subpass::from(postprocess_tonemap_renderpass.clone(), 0)
-            .unwrap())
-            .build(device.clone())
-            .unwrap()
+            .render_pass(Subpass::from(postprocess_tonemap_renderpass.clone(), 0).unwrap())
+            .build(device.clone())?
     });
 
     let postprocess_sep_set = Arc::new({
         PersistentDescriptorSet::start(postprocess_sep_pipeline.clone(), 0)
-            .add_sampled_image(scene_color_attachment.clone(), sampler.clone())
-            .unwrap()
-            .build()
-            .unwrap()
+            .add_sampled_image(scene_color_attachment.clone(), sampler.clone())?
+            .build()?
     });
 
     // Ping set is used to render to ping, therefore has to use pong attachment
     let postprocess_blur_ping_set = Arc::new({
         PersistentDescriptorSet::start(postprocess_blur_ping_pipeline.clone(), 0)
-            .add_sampled_image(sep_attachment.clone(), sampler.clone())
-            .unwrap()
-            .add_buffer(blur_direction_uniform_buffer_horizontal.clone())
-            .unwrap()
-            .add_buffer(blur_kernel_uniform_buffer.clone())
-            .unwrap()
-            .build()
-            .unwrap()
+            .add_sampled_image(sep_attachment.clone(), sampler.clone())?
+            .add_buffer(blur_direction_uniform_buffer_horizontal.clone())?
+            .add_buffer(blur_kernel_uniform_buffer.clone())?
+            .build()?
     });
 
     // Pong set is used to render to pong, therefore has to use ping attachment
     let postprocess_blur_pong_set = Arc::new({
         PersistentDescriptorSet::start(postprocess_blur_pong_pipeline.clone(), 0)
-            .add_sampled_image(ping_attachment.clone(), sampler.clone())
-            .unwrap()
-            .add_buffer(blur_direction_uniform_buffer_vertical.clone())
-            .unwrap()
-            .add_buffer(blur_kernel_uniform_buffer.clone())
-            .unwrap()
-            .build()
-            .unwrap()
+            .add_sampled_image(ping_attachment.clone(), sampler.clone())?
+            .add_buffer(blur_direction_uniform_buffer_vertical.clone())?
+            .add_buffer(blur_kernel_uniform_buffer.clone())?
+            .build()?
     });
 
     let postprocess_tonemap_set = Arc::new({
         PersistentDescriptorSet::start(postprocess_tonemap_pipeline.clone(), 0)
-            .add_sampled_image(scene_color_attachment.clone(), sampler.clone())
-            .unwrap()
-            .add_sampled_image(pong_attachment.clone(), sampler.clone())
-            .unwrap()
-            .build()
-            .unwrap()
+            .add_sampled_image(scene_color_attachment.clone(), sampler.clone())?
+            .add_sampled_image(pong_attachment.clone(), sampler.clone())?
+            .build()?
     });
 
-    let mut previous_frame_end: Box<GpuFuture> = Box::new(vk_sync::now(device.clone()));
+    let mut previous_frame_end: Box<dyn GpuFuture> = Box::new(vk_sync::now(device.clone()));
 
     let mut framebuffers: Option<Vec<Arc<Framebuffer<_,_>>>> = None;
     let mut recreate_swapchain = false;
@@ -678,21 +648,21 @@ fn main() {
                 view: view_matrix.into(),
                 proj: proj_matrix.into(),
             };
-            let matrix_subbuffer = matrix_uniform_buffer.next(matrix_data).unwrap();
+            let matrix_subbuffer = matrix_uniform_buffer.next(matrix_data)?;
 
             let material_data = scene_fs_mod::ty::Material {
                 glow_strength: 10.0 * (factor.sin() + 1.0) as f32,
             };
-            let material_subbuffer = material_uniform_buffer.next(material_data).unwrap();
+            let material_subbuffer = material_uniform_buffer.next(material_data)?;
 
             (matrix_subbuffer, material_subbuffer)
         };
 
         let scene_set = Arc::new({
             PersistentDescriptorSet::start(scene_pipeline.clone(), 0)
-                .add_buffer(matrix_uniform_subbuffer).unwrap()
-                .add_buffer(material_uniform_subbuffer).unwrap()
-                .build().unwrap()
+                .add_buffer(matrix_uniform_subbuffer)?
+                .add_buffer(material_uniform_subbuffer)?
+                .build()?
         });
 
         let scene_dynamic_state = DynamicState {
@@ -719,8 +689,7 @@ fn main() {
         let command_buffer = AutoCommandBufferBuilder::primary_one_time_submit(
             device.clone(),
             queue.family()
-            )
-            .unwrap()
+            )?
             // BEGIN SCENE
             .begin_render_pass(
                 scene_framebuffer.clone(),
@@ -729,8 +698,7 @@ fn main() {
                     ClearValue::Float([0.0, 0.0, 0.0, 1.0]),
                     ClearValue::Depth(1.0),
                 ],
-            )
-            .unwrap()
+            )?
             .draw_indexed(
                 scene_pipeline.clone(),
                 scene_dynamic_state.clone(),
@@ -738,86 +706,71 @@ fn main() {
                 scene_index_buffer.clone(),
                 scene_set.clone(),
                 (),
-            )
-            .unwrap()
-            .end_render_pass()
-            .unwrap()
+            )?
+            .end_render_pass()?
             // END SCENE
             // BEGIN SEP
             .begin_render_pass(
                 sep_framebuffer.clone(),
                 false,
                 vec![ClearValue::None],
-            )
-            .unwrap()
+            )?
             .draw(
                 postprocess_sep_pipeline.clone(),
                 postprocess_dynamic_state.clone(),
                 postprocess_vertex_buffer.clone(),
                 postprocess_sep_set.clone(),
                 (),
-            )
-            .unwrap()
-            .end_render_pass()
-            .unwrap()
+            )?
+            .end_render_pass()?
             // END SEP
             // BEGIN BLUR
             .begin_render_pass(
                 ping_framebuffer.clone(),
                 false,
                 vec![ClearValue::None],
-            )
-            .unwrap()
+            )?
             .draw(
                 postprocess_blur_ping_pipeline.clone(),
                 postprocess_dynamic_state.clone(),
                 postprocess_vertex_buffer.clone(),
                 postprocess_blur_ping_set.clone(),
                 (),
-            )
-            .unwrap()
-            .end_render_pass()
-            .unwrap()
+            )?
+            .end_render_pass()?
             .begin_render_pass(
                 pong_framebuffer.clone(),
                 false,
                 vec![ClearValue::None],
-            )
-            .unwrap()
+            )?
             .draw(
                 postprocess_blur_pong_pipeline.clone(),
                 postprocess_dynamic_state.clone(),
                 postprocess_vertex_buffer.clone(),
                 postprocess_blur_pong_set.clone(),
                 (),
-            )
-            .unwrap()
-            .end_render_pass()
-            .unwrap()
+            )?
+            .end_render_pass()?
             // END BLUR
             // BEGIN TONEMAP
             .begin_render_pass(
                 framebuffers.as_ref().unwrap()[image_num].clone(),
                 false,
                 vec![ClearValue::None],
-            )
-            .unwrap()
+            )?
             .draw(
                 postprocess_tonemap_pipeline.clone(),
                 scene_dynamic_state.clone(),
                 postprocess_vertex_buffer.clone(),
                 postprocess_tonemap_set.clone(),
                 (),
-            )
-            .unwrap()
-            .end_render_pass()
-            .unwrap()
+            )?
+            .end_render_pass()?
             // END TONEMAP
-            .build()
-            .unwrap();
+            .build()?;
 
         let future = previous_frame_end.join(acquire_future)
-            .then_execute(queue.clone(), command_buffer).unwrap()
+            .then_execute(queue.clone(), command_buffer)?
             .then_swapchain_present(queue.clone(), swapchain.clone(), image_num)
             .then_signal_fence_and_flush();
 
@@ -840,7 +793,7 @@ fn main() {
                 _ => (),
             }
         });
-        if done { return; }
+        if done { return Ok(()); }
     }
 }
 
