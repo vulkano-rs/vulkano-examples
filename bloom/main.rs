@@ -22,7 +22,7 @@
 //!
 //! # Implementing Bloom
 //!
-//! Bloom happens in the screenspace, and usually requires at lest 3-4
+//! Bloom happens in the screenspace, and usually requires at least 3-4
 //! rendering passes. Conceptually, the following happens:
 //!     1.  Scene is rendered to an image
 //!     2.  Bright colors are separated from the rendered scene to its own image
@@ -46,8 +46,8 @@
 //! Once we have the image containing the bright areas, we can perform gaussian
 //! blur on it. This is done by convoluting a gaussian kernel on the image's pixels.
 //!
-//! When applying this 3x3 gaussian kernel to a pixel, its value will be the its
-//! original value multiplied by the kernel's middle cell, summed with the kernel's
+//! When applying this 3x3 gaussian kernel to a pixel, its value will be the
+//! original value multiplied by the kernel's middle cell summed with the kernel's
 //! outer cells multiplied with their corresponding pixels in our image.
 //!
 //! 0.077847	0.123317	0.077847
@@ -59,11 +59,11 @@
 //! for this 3x3 kernel we will need to perform 9 texture sample operations.
 //!
 //! To optimize, we can use 1d kernels instead of 2d, and blur in multiple render
-//! passes (eg first horizontally, then vertically).
+//! passes - first horizontally, then vertically.
 //! This reduces the number of sample operations from N ^ 2 to 2 * N, and is
 //! a significant speedup for larger blur kernels.
 //!
-//! To achieve the right visual result, we can apply the pairs of blur passes
+//! To achieve right visual results, we can apply the pairs of blur passes
 //! multiple times.
 //!
 //! ## Merge Pass
@@ -78,13 +78,14 @@
 //! Besides using 1d kernels for blur, we can also do the following.
 //!
 //! Use a fraction of the screen resolution for the blur images. Since we sample
-//! the images anyway, they do not need to be the same size. This effectively
-//! reduces the number of fragment shader runs. The resolution can easily be
-//! halved before any visual degradation of output.
+//! the images anyway, they do not need to be the same size. This can
+//! reduce the number of fragment shader runs. The resolution can easily be
+//! halved before any much degradation occurs.
 //!
 //! Another optimization is sampling between two pixels and strinding
 //! two pixels at once when blurring. This increases the blur's reach, and we
-//! may potentially use a lesser number of passes achieve the same visual result.
+//! may potentially use a lesser number of passes or smaller kernels to achieve
+//! same visual results.
 //!
 
 #[macro_use]
