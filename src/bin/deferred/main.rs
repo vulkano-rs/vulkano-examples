@@ -19,7 +19,7 @@
 // After all the objects are drawn, you should obtain several images that contain the
 // characteristics of each pixel.
 // 
-// Then you apply lighting to the screne. In other words you draw to the final image by taking
+// Then you apply lighting to the scene. In other words you draw to the final image by taking
 // these intermediate images and the various lights of the scene as input.
 // 
 // This technique allows you to apply tons of light sources to a scene, which would be too
@@ -69,11 +69,13 @@ fn main() {
     let window = winit::WindowBuilder::new().build_vk_surface(&events_loop, instance.clone()).unwrap();
 
     let dimensions = {
-        let (width, height) = window.window().get_inner_size().unwrap();
+        let window = window.window();
+        let factor = window.get_hidpi_factor();
+        let (width, height) = window.get_inner_size().unwrap().to_physical(factor).into();
         [width, height]
     };
 
-    let queue = physical.queue_families().find(|&q| {
+    let queue_family = physical.queue_families().find(|&q| {
         q.supports_graphics() && window.is_supported(q).unwrap_or(false)
     }).expect("couldn't find a graphical queue family");
 
@@ -84,7 +86,7 @@ fn main() {
         };
 
         Device::new(physical, physical.supported_features(), &device_ext,
-                    [(queue, 0.5)].iter().cloned()).expect("failed to create device")
+                    [(queue_family, 0.5)].iter().cloned()).expect("failed to create device")
     };
 
     let queue = queues.next().unwrap();
@@ -114,7 +116,7 @@ fn main() {
 
         if recreate_swapchain {
             let dimensions = {
-                let (new_width, new_height) = window.window().get_inner_size().unwrap();
+                let (new_width, new_height) = window.window().get_inner_size().unwrap().into();
                 [new_width, new_height]
             };
             
@@ -171,8 +173,8 @@ fn main() {
         let mut done = false;
         events_loop.poll_events(|ev| {
             match ev {
-                winit::Event::WindowEvent { event: winit::WindowEvent::Closed, .. } => done = true,
-                winit::Event::WindowEvent { event: winit::WindowEvent::Resized(_, _), .. } => recreate_swapchain = true,
+                winit::Event::WindowEvent { event: winit::WindowEvent::CloseRequested, .. } => done = true,
+                winit::Event::WindowEvent { event: winit::WindowEvent::Resized (_), .. } => recreate_swapchain = true,
                 _ => ()
             }
         });

@@ -1,25 +1,14 @@
 [package]
-name = "vulkano-examples"
+name = "examples"
 version = "0.1.0"
 authors = ["Pierre Krieger <pierre.krieger1708@gmail.com>"]
+publish = false
 
 [dependencies]
-vulkano = "0.9"
-vulkano-shader-derive = "0.9"
-vulkano-win = "0.9"
-cgmath = "0.14.1"
-image = "0.14.0"
-winit = "0.11.0"
+vulkano = "0.10"
+vulkano-shader-derive = "0.10"
+vulkano-win = "0.10"
+cgmath = "0.16"
+image = "0.19"
+winit = "0.17"
 time = "0.1.37"
-
-[[bin]]
-name = "deferred"
-path = "deferred/main.rs"
-
-[[bin]]
-name = "msaa-renderpass"
-path = "msaa-renderpass/main.rs"
-
-[[bin]]
-name = "triangle"
-path = "triangle/main.rs"
