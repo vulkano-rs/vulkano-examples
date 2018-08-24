@@ -274,12 +274,6 @@ fn main() -> Result<(), Error> {
         cube::VERTICES.iter().cloned(),
     ).expect("failed to create buffer");
 
-    let scene_uv_buffer = CpuAccessibleBuffer::from_iter(
-        device.clone(),
-        BufferUsage::all(),
-        cube::UVS.iter().cloned(),
-    ).expect("failed to create buffer");
-
     let scene_index_buffer = CpuAccessibleBuffer::from_iter(
         device.clone(),
         BufferUsage::all(),
@@ -290,9 +284,9 @@ fn main() -> Result<(), Error> {
         #[derive(Debug, Clone)]
         struct VertexUv {
             a_position: [f32; 2],
-            a_texcoord: [f32; 2],
+            a_uv: [f32; 2],
         }
-        impl_vertex!(VertexUv, a_position, a_texcoord);
+        impl_vertex!(VertexUv, a_position, a_uv);
 
         CpuAccessibleBuffer::from_iter(
             device.clone(),
@@ -300,15 +294,15 @@ fn main() -> Result<(), Error> {
             [
                 VertexUv {
                     a_position: [-1.0, 3.0],
-                    a_texcoord: [0.0, 2.0],
+                    a_uv: [0.0, 2.0],
                 },
                 VertexUv {
                     a_position: [-1.0, -1.0],
-                    a_texcoord: [0.0, 0.0],
+                    a_uv: [0.0, 0.0],
                 },
                 VertexUv {
                     a_position: [3.0, -1.0],
-                    a_texcoord: [2.0, 0.0],
+                    a_uv: [2.0, 0.0],
                 },
             ].iter()
                 .cloned(),
@@ -497,7 +491,7 @@ fn main() -> Result<(), Error> {
 
     let scene_pipeline = Arc::new({
         GraphicsPipeline::start()
-            .vertex_input(vulkano::pipeline::vertex::TwoBuffersDefinition::new())
+            .vertex_input_single_buffer()
             .vertex_shader(scene_vs.main_entry_point(), ())
             .triangle_list()
             .viewports_dynamic_scissors_irrelevant(1)
@@ -703,7 +697,7 @@ fn main() -> Result<(), Error> {
             .draw_indexed(
                 scene_pipeline.clone(),
                 scene_dynamic_state.clone(),
-                (scene_vertex_buffer.clone(), scene_uv_buffer.clone()),
+                (scene_vertex_buffer.clone()),
                 scene_index_buffer.clone(),
                 scene_set.clone(),
                 (),
@@ -869,12 +863,12 @@ mod postprocess_vs_mod {
 #version 450
 
 layout (location = 0) in vec2 a_position;
-layout (location = 1) in vec2 a_texcoord;
+layout (location = 1) in vec2 a_uv;
 
-layout (location = 0) out vec2 v_texcoord;
+layout (location = 0) out vec2 v_uv;
 
 void main() {
-    v_texcoord = a_texcoord;
+    v_uv = a_uv;
     gl_Position = vec4(a_position, 0.0, 1.0);
 }
 "]
@@ -890,12 +884,12 @@ mod postprocess_sep_fs_mod {
 
 layout (set = 0, binding = 0) uniform sampler2D u_image;
 
-layout (location = 0) in vec2 v_texcoord;
+layout (location = 0) in vec2 v_uv;
 
 layout (location = 0) out vec4 f_color;
 
 void main() {
-    vec4 color = texture(u_image, v_texcoord);
+    vec4 color = texture(u_image, v_uv);
 
     // Convert to grayscale and compute brightness
     float brightness = dot(color.rgb, vec3(0.2126, 0.7152, 0.0722));
@@ -922,7 +916,7 @@ layout (set = 0, binding = 2) uniform BlurKernel {
     float[KERNEL_LENGTH] kernel;
 } u_blur_kernel;
 
-layout (location = 0) in vec2 v_texcoord;
+layout (location = 0) in vec2 v_uv;
 
 layout (location = 0) out vec4 f_color;
 
@@ -931,12 +925,12 @@ void main() {
     vec2 two_px = blur_direction * vec2(2) / vec2(textureSize(u_image, 0));
     vec2 half_px = two_px / 4.0;
 
-    vec4 color_sum = u_blur_kernel.kernel[0] * texture(u_image, v_texcoord);
+    vec4 color_sum = u_blur_kernel.kernel[0] * texture(u_image, v_uv);
     for (int i = 1; i <= KERNEL_LENGTH; i++) {
         float k = u_blur_kernel.kernel[i];
         vec2 offset = two_px * float(i) - half_px;
-        color_sum += k * texture(u_image,  offset + v_texcoord);
-        color_sum += k * texture(u_image, -offset + v_texcoord);
+        color_sum += k * texture(u_image,  offset + v_uv);
+        color_sum += k * texture(u_image, -offset + v_uv);
     }
     f_color = color_sum;
 }
@@ -954,13 +948,13 @@ mod postprocess_tonemap_fs_mod {
 layout (set = 0, binding = 0) uniform sampler2D u_image;
 layout (set = 0, binding = 1) uniform sampler2D u_image_blur;
 
-layout (location = 0) in vec2 v_texcoord;
+layout (location = 0) in vec2 v_uv;
 
 layout (location = 0) out vec4 f_color;
 
 void main() {
-    vec3 color = texture(u_image, v_texcoord).rgb;
-    vec3 bloom = texture(u_image_blur, v_texcoord).rgb;
+    vec3 color = texture(u_image, v_uv).rgb;
+    vec3 bloom = texture(u_image_blur, v_uv).rgb;
 
     const float gamma = 2.2;
 
