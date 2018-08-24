@@ -7,7 +7,6 @@
 // notice may not be copied, modified, or distributed except
 // according to those terms.
 
-
 //! Bloom example, using multiple renderpasses
 //!
 //! # Introduction to Bloom
@@ -92,81 +91,78 @@
 extern crate vulkano;
 #[macro_use]
 extern crate vulkano_shader_derive;
-extern crate winit;
-extern crate vulkano_win;
 extern crate cgmath;
 extern crate failure;
+extern crate vulkano_win;
+extern crate winit;
 
 use std::sync::Arc;
-use std::mem;
 use std::time::Instant;
 
-use cgmath::{Rad, Point3, Vector3, Matrix4};
-
-use winit::{EventsLoop, WindowBuilder, Event, WindowEvent};
-
-use vulkano_win::VkSurfaceBuild;
-
-use vulkano::instance::Instance;
-use vulkano::instance::PhysicalDevice;
-use vulkano::device::Device;
-use vulkano::device::DeviceExtensions;
+use cgmath::{Matrix4, Point3, Rad, Vector3};
+use failure::Error;
 use vulkano::buffer::BufferUsage;
 use vulkano::buffer::CpuAccessibleBuffer;
 use vulkano::buffer::CpuBufferPool;
 use vulkano::command_buffer::AutoCommandBufferBuilder;
 use vulkano::command_buffer::DynamicState;
 use vulkano::descriptor::descriptor_set::PersistentDescriptorSet;
-use vulkano::image::ImageUsage;
-use vulkano::image::AttachmentImage;
-use vulkano::sampler::Sampler;
-use vulkano::format::Format;
+use vulkano::device::Device;
+use vulkano::device::DeviceExtensions;
 use vulkano::format::ClearValue;
+use vulkano::format::Format;
 use vulkano::framebuffer::Framebuffer;
 use vulkano::framebuffer::Subpass;
-use vulkano::pipeline::GraphicsPipeline;
+use vulkano::image::AttachmentImage;
+use vulkano::image::ImageUsage;
+use vulkano::instance::Instance;
+use vulkano::instance::PhysicalDevice;
 use vulkano::pipeline::viewport::Viewport;
+use vulkano::pipeline::GraphicsPipeline;
+use vulkano::sampler::Sampler;
 use vulkano::swapchain;
-use vulkano::swapchain::Swapchain;
+use vulkano::swapchain::AcquireError;
 use vulkano::swapchain::PresentMode;
 use vulkano::swapchain::SurfaceTransform;
-use vulkano::swapchain::AcquireError;
+use vulkano::swapchain::Swapchain;
 use vulkano::swapchain::SwapchainCreationError;
 use vulkano::sync as vk_sync;
 use vulkano::sync::GpuFuture;
-
-use failure::Error;
+use vulkano_win::VkSurfaceBuild;
+use winit::{Event, EventsLoop, WindowBuilder, WindowEvent};
 
 mod cube;
 
 fn main() -> Result<(), Error> {
     let instance = {
         let extensions = vulkano_win::required_extensions();
-        Instance::new(None, &extensions, None)
-            .expect("failed to create Vulkan instance")
+        Instance::new(None, &extensions, None).expect("failed to create Vulkan instance")
     };
 
     let physical = PhysicalDevice::enumerate(&instance)
         .next()
         .expect("no device available");
 
-    println!("Using device: {} (type: {:?})", physical.name(), physical.ty());
+    println!(
+        "Using device: {} (type: {:?})",
+        physical.name(),
+        physical.ty()
+    );
 
     let mut events_loop = EventsLoop::new();
     let surface = WindowBuilder::new()
         .build_vk_surface(&events_loop, instance.clone())
         .expect("failed to create window");
 
-    let queue_family = physical.queue_families()
-        .find(|&q| {
-            q.supports_graphics() && surface.is_supported(q).unwrap_or(false)
-        })
+    let queue_family = physical
+        .queue_families()
+        .find(|&q| q.supports_graphics() && surface.is_supported(q).unwrap_or(false))
         .expect("couldn't find a graphical queue family");
 
     let (device, mut queues) = {
         let device_ext = DeviceExtensions {
             khr_swapchain: true,
-            .. DeviceExtensions::none()
+            ..DeviceExtensions::none()
         };
 
         Device::new(
@@ -181,7 +177,8 @@ fn main() -> Result<(), Error> {
 
     let mut dimensions;
     let (mut swapchain, mut images) = {
-        let caps = surface.capabilities(physical)
+        let caps = surface
+            .capabilities(physical)
             .expect("failed to get surface capabilities");
 
         dimensions = caps.current_extent.unwrap_or([1024, 768]);
@@ -219,7 +216,7 @@ fn main() -> Result<(), Error> {
             storage: true,
             color_attachment: true,
             sampled: true,
-            .. ImageUsage::none()
+            ..ImageUsage::none()
         },
     ).expect("failed to create attachment image");
 
@@ -231,7 +228,7 @@ fn main() -> Result<(), Error> {
             storage: true,
             depth_stencil_attachment: true,
             sampled: true,
-            .. ImageUsage::none()
+            ..ImageUsage::none()
         },
     ).expect("failed to create attachment image");
 
@@ -243,7 +240,7 @@ fn main() -> Result<(), Error> {
             storage: true,
             color_attachment: true,
             sampled: true,
-            .. ImageUsage::none()
+            ..ImageUsage::none()
         },
     ).expect("failed to create attachment image");
 
@@ -255,7 +252,7 @@ fn main() -> Result<(), Error> {
             storage: true,
             color_attachment: true,
             sampled: true,
-            .. ImageUsage::none()
+            ..ImageUsage::none()
         },
     ).expect("failed to create attachment image");
 
@@ -267,7 +264,7 @@ fn main() -> Result<(), Error> {
             storage: true,
             color_attachment: true,
             sampled: true,
-            .. ImageUsage::none()
+            ..ImageUsage::none()
         },
     ).expect("failed to create attachment image");
 
@@ -291,33 +288,44 @@ fn main() -> Result<(), Error> {
 
     let postprocess_vertex_buffer = {
         #[derive(Debug, Clone)]
-        struct VertexUv { a_position: [f32; 2], a_texcoord: [f32; 2] }
+        struct VertexUv {
+            a_position: [f32; 2],
+            a_texcoord: [f32; 2],
+        }
         impl_vertex!(VertexUv, a_position, a_texcoord);
 
-        CpuAccessibleBuffer::from_iter(device.clone(), BufferUsage::all(), [
-            VertexUv { a_position: [-1.0, 3.0], a_texcoord: [0.0, 2.0] },
-            VertexUv { a_position: [-1.0, -1.0], a_texcoord: [0.0, 0.0] },
-            VertexUv { a_position: [3.0, -1.0], a_texcoord: [2.0, 0.0] },
-        ].iter().cloned()).expect("failed to create buffer")
+        CpuAccessibleBuffer::from_iter(
+            device.clone(),
+            BufferUsage::all(),
+            [
+                VertexUv {
+                    a_position: [-1.0, 3.0],
+                    a_texcoord: [0.0, 2.0],
+                },
+                VertexUv {
+                    a_position: [-1.0, -1.0],
+                    a_texcoord: [0.0, 0.0],
+                },
+                VertexUv {
+                    a_position: [3.0, -1.0],
+                    a_texcoord: [2.0, 0.0],
+                },
+            ].iter()
+                .cloned(),
+        ).expect("failed to create buffer")
     };
 
-    let matrix_uniform_buffer = CpuBufferPool::<scene_vs_mod::ty::Matrices>::new(
-        device.clone(),
-        BufferUsage::all(),
-    );
+    let matrix_uniform_buffer =
+        CpuBufferPool::<scene_vs_mod::ty::Matrices>::new(device.clone(), BufferUsage::all());
 
-    let material_uniform_buffer = CpuBufferPool::<scene_fs_mod::ty::Material>::new(
-        device.clone(),
-        BufferUsage::all(),
-    );
+    let material_uniform_buffer =
+        CpuBufferPool::<scene_fs_mod::ty::Material>::new(device.clone(), BufferUsage::all());
 
     let blur_direction_uniform_buffer_horizontal = {
         CpuAccessibleBuffer::from_data(
             device.clone(),
             BufferUsage::all(),
-            postprocess_blur_fs_mod::ty::BlurDirection {
-                direction: [1, 0],
-            }
+            postprocess_blur_fs_mod::ty::BlurDirection { direction: [1, 0] },
         ).expect("failed to create buffer")
     };
 
@@ -325,9 +333,7 @@ fn main() -> Result<(), Error> {
         CpuAccessibleBuffer::from_data(
             device.clone(),
             BufferUsage::all(),
-            postprocess_blur_fs_mod::ty::BlurDirection {
-                direction: [0, 1],
-            }
+            postprocess_blur_fs_mod::ty::BlurDirection { direction: [0, 1] },
         ).expect("failed to create buffer")
     };
 
@@ -336,15 +342,8 @@ fn main() -> Result<(), Error> {
             device.clone(),
             BufferUsage::all(),
             postprocess_blur_fs_mod::ty::BlurKernel {
-                kernel: [
-	                0.382925,
-                    0.24173,
-                    0.060598,
-                    0.005977,
-                    0.000229,
-                    0.000003,
-                ],
-            }
+                kernel: [0.382925, 0.24173, 0.060598, 0.005977, 0.000229, 0.000003],
+            },
         ).expect("failed to create buffer")
     };
 
@@ -361,13 +360,13 @@ fn main() -> Result<(), Error> {
         Vector3::new(0.0, 1.0, 0.0),
     );
 
-    let scene_vs = scene_vs_mod::Shader::load(device.clone())
-        .expect("failed to create shader module");
-    let scene_fs = scene_fs_mod::Shader::load(device.clone())
-        .expect("failed to create shader module");
+    let scene_vs =
+        scene_vs_mod::Shader::load(device.clone()).expect("failed to create shader module");
+    let scene_fs =
+        scene_fs_mod::Shader::load(device.clone()).expect("failed to create shader module");
 
-    let postprocess_vs = postprocess_vs_mod::Shader::load(device.clone())
-        .expect("failed to create shader module");
+    let postprocess_vs =
+        postprocess_vs_mod::Shader::load(device.clone()).expect("failed to create shader module");
     let postprocess_sep_fs = postprocess_sep_fs_mod::Shader::load(device.clone())
         .expect("failed to create shader module");
     let postprocess_blur_fs = postprocess_blur_fs_mod::Shader::load(device.clone())
@@ -496,7 +495,6 @@ fn main() -> Result<(), Error> {
             .build()?
     });
 
-
     let scene_pipeline = Arc::new({
         GraphicsPipeline::start()
             .vertex_input(vulkano::pipeline::vertex::TwoBuffersDefinition::new())
@@ -527,10 +525,7 @@ fn main() -> Result<(), Error> {
             .triangle_list()
             .viewports_dynamic_scissors_irrelevant(1)
             .fragment_shader(postprocess_blur_fs.main_entry_point(), ())
-            .render_pass(Subpass::from(
-                postprocess_blur_ping_renderpass.clone(),
-                0,
-            ).unwrap())
+            .render_pass(Subpass::from(postprocess_blur_ping_renderpass.clone(), 0).unwrap())
             .build(device.clone())?
     });
 
@@ -541,10 +536,7 @@ fn main() -> Result<(), Error> {
             .triangle_list()
             .viewports_dynamic_scissors_irrelevant(1)
             .fragment_shader(postprocess_blur_fs.main_entry_point(), ())
-            .render_pass(Subpass::from(
-                postprocess_blur_pong_renderpass.clone(),
-                0,
-            ).unwrap())
+            .render_pass(Subpass::from(postprocess_blur_pong_renderpass.clone(), 0).unwrap())
             .build(device.clone())?
     });
 
@@ -592,7 +584,7 @@ fn main() -> Result<(), Error> {
 
     let mut previous_frame_end: Box<dyn GpuFuture> = Box::new(vk_sync::now(device.clone()));
 
-    let mut framebuffers: Option<Vec<Arc<Framebuffer<_,_>>>> = None;
+    let mut framebuffers: Option<Vec<Arc<Framebuffer<_, _>>>> = None;
     let mut recreate_swapchain = false;
 
     let time_start = Instant::now();
@@ -600,9 +592,11 @@ fn main() -> Result<(), Error> {
         previous_frame_end.cleanup_finished();
 
         if recreate_swapchain {
-            dimensions = surface.capabilities(physical)
+            dimensions = surface
+                .capabilities(physical)
                 .expect("failed to get surface capabilities")
-                .current_extent.unwrap();
+                .current_extent
+                .unwrap();
 
             let (new_swapchain, new_images) = match swapchain.recreate_with_dimension(dimensions) {
                 Ok(r) => r,
@@ -610,8 +604,8 @@ fn main() -> Result<(), Error> {
                 Err(err) => panic!("{:?}", err),
             };
 
-            mem::replace(&mut swapchain, new_swapchain);
-            mem::replace(&mut images, new_images);
+            swapchain = new_swapchain;
+            images = new_images;
 
             framebuffers = None;
             recreate_swapchain = false;
@@ -619,31 +613,37 @@ fn main() -> Result<(), Error> {
 
         if framebuffers.is_none() {
             let new_framebuffers = Some({
-                images.iter()
-                    .map(|image| Arc::new({
-                        Framebuffer::start(postprocess_tonemap_renderpass.clone())
-                            .add(image.clone()).unwrap()
-                            .build().unwrap()
-                    }))
+                images
+                    .iter()
+                    .map(|image| {
+                        Arc::new({
+                            Framebuffer::start(postprocess_tonemap_renderpass.clone())
+                                .add(image.clone())
+                                .unwrap()
+                                .build()
+                                .unwrap()
+                        })
+                    })
                     .collect::<Vec<_>>()
             });
-            mem::replace(&mut framebuffers, new_framebuffers);
+
+            framebuffers = new_framebuffers;
         }
 
-        let (image_num, acquire_future) = match swapchain::acquire_next_image(swapchain.clone(), None) {
-            Ok(r) => r,
-            Err(AcquireError::OutOfDate) => {
-                recreate_swapchain = true;
-                continue;
-            },
-            Err(err) => panic!("{:?}", err),
-        };
+        let (image_num, acquire_future) =
+            match swapchain::acquire_next_image(swapchain.clone(), None) {
+                Ok(r) => r,
+                Err(AcquireError::OutOfDate) => {
+                    recreate_swapchain = true;
+                    continue;
+                }
+                Err(err) => panic!("{:?}", err),
+            };
 
         let (matrix_uniform_subbuffer, material_uniform_subbuffer) = {
             let elapsed = time_start.elapsed();
 
-            let factor = elapsed.as_secs() as f64
-                + elapsed.subsec_nanos() as f64 * 1e-9;
+            let factor = elapsed.as_secs() as f64 + elapsed.subsec_nanos() as f64 * 1e-9;
             let matrix_data = scene_vs_mod::ty::Matrices {
                 model: Matrix4::from_angle_y(Rad(factor as f32)).into(),
                 view: view_matrix.into(),
@@ -670,9 +670,9 @@ fn main() -> Result<(), Error> {
             viewports: Some(vec![Viewport {
                 origin: [0.0, 0.0],
                 dimensions: [dimensions[0] as f32, dimensions[1] as f32],
-                depth_range: 0.0 .. 1.0,
+                depth_range: 0.0..1.0,
             }]),
-            .. DynamicState::none()
+            ..DynamicState::none()
         };
 
         let postprocess_dynamic_state = DynamicState {
@@ -682,9 +682,9 @@ fn main() -> Result<(), Error> {
                     postprocess_dimensions[0] as f32,
                     postprocess_dimensions[1] as f32,
                 ],
-                depth_range: 0.0 .. 1.0,
+                depth_range: 0.0..1.0,
             }]),
-            .. DynamicState::none()
+            ..DynamicState::none()
         };
 
         let command_buffer = AutoCommandBufferBuilder::primary_one_time_submit(
@@ -770,7 +770,8 @@ fn main() -> Result<(), Error> {
             // END TONEMAP
             .build()?;
 
-        let future = previous_frame_end.join(acquire_future)
+        let future = previous_frame_end
+            .join(acquire_future)
             .then_execute(queue.clone(), command_buffer)?
             .then_swapchain_present(queue.clone(), swapchain.clone(), image_num)
             .then_signal_fence_and_flush();
@@ -780,21 +781,24 @@ fn main() -> Result<(), Error> {
             Err(vk_sync::FlushError::OutOfDate) => {
                 recreate_swapchain = true;
                 previous_frame_end = Box::new(vk_sync::now(device.clone()));
-            },
+            }
             Err(e) => {
                 println!("{:?}", e);
                 previous_frame_end = Box::new(vk_sync::now(device.clone()));
-            },
+            }
         }
 
         let mut done = false;
-        events_loop.poll_events(|ev| {
-            match ev {
-                Event::WindowEvent { event: WindowEvent::Closed, .. } => done = true,
-                _ => (),
-            }
+        events_loop.poll_events(|ev| match ev {
+            Event::WindowEvent {
+                event: WindowEvent::Closed,
+                ..
+            } => done = true,
+            _ => (),
         });
-        if done { return Ok(()); }
+        if done {
+            return Ok(());
+        }
     }
 }
 
