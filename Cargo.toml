@@ -11,6 +11,7 @@ cgmath = "0.14.1"
 image = "0.14.0"
 winit = "0.11.0"
 time = "0.1.37"
+failure = "0.1.1"
 
 [[bin]]
 name = "deferred"
@@ -19,6 +20,10 @@ path = "deferred/main.rs"
 [[bin]]
 name = "msaa-renderpass"
 path = "msaa-renderpass/main.rs"
+
+[[bin]]
+name = "bloom"
+path = "bloom/main.rs"
 
 [[bin]]
 name = "triangle"
