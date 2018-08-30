@@ -72,7 +72,7 @@ impl TriangleDrawSystem {
                                                      self.pipeline.clone().subpass())
             .unwrap()
             .draw(self.pipeline.clone(),
-                  DynamicState {
+                  &DynamicState {
                       viewports: Some(vec![Viewport {
                           origin: [0.0, 0.0],
                           dimensions: [viewport_dimensions[0] as f32,

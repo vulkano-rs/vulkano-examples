@@ -17,9 +17,6 @@
 // and that you want to learn Vulkan. This means that for example it won't go into details about
 // what a vertex or a shader is.
 
-// For the purpose of this example all unused code is allowed.
-#![allow(dead_code)]
-
 // The `vulkano` crate is the main crate that you must use to use Vulkan.
 #[macro_use]
 extern crate vulkano;
@@ -57,7 +54,6 @@ use vulkano::sync::now;
 use vulkano::sync::GpuFuture;
 
 use std::sync::Arc;
-use std::mem;
 
 fn main() {
     // The first step of any vulkan program is to create an instance.
@@ -94,23 +90,17 @@ fn main() {
 
 
     // The objective of this example is to draw a triangle on a window. To do so, we first need to
-    // create a surface that is wrapped in a window.
+    // create the window.
     //
-    // This is done by creating a WindowBuilder from the winit crate, then calling the
-    // build_vk_surface method provided by the VkSurfaceBuild trait from vulkano_win. If you
-    // ever get an error about build_vk_surface being undefined in one of your projects, this
+    // This is done by creating a `WindowBuilder` from the `winit` crate, then calling the
+    // `build_vk_surface` method provided by the `VkSurfaceBuild` trait from `vulkano_win`. If you
+    // ever get an error about `build_vk_surface` being undefined in one of your projects, this
     // probably means that you forgot to import this trait.
     //
-    // This returns a vulkano::swapchain::Surface object wrapped in a cross-platform vulkano-winit window.
+    // This returns a `vulkano::swapchain::Surface` object that contains both a cross-platform winit
+    // window and a cross-platform Vulkan surface that represents the surface of the window.
     let mut events_loop = winit::EventsLoop::new();
-    let window = winit::WindowBuilder::new().build_vk_surface(&events_loop, instance.clone()).unwrap();
-
-    // Get the dimensions of the viewport. These variables need to be mutable since the viewport
-    // can change size.
-    let mut dimensions = {
-        let (width, height) = window.window().get_inner_size().unwrap();
-        [width, height]
-    };
+    let surface = winit::WindowBuilder::new().build_vk_surface(&events_loop, instance.clone()).unwrap();
 
     // The next step is to choose which GPU queue will execute our draw commands.
     //
@@ -122,9 +112,9 @@ fn main() {
     // queue to handle data transfers in parallel. In this example we only use one queue.
     //
     // We have to choose which queues to use early on, because we will need this info very soon.
-    let queue = physical.queue_families().find(|&q| {
+    let queue_family = physical.queue_families().find(|&q| {
         // We take the first queue that supports drawing to our window.
-        q.supports_graphics() && window.is_supported(q).unwrap_or(false)
+        q.supports_graphics() && surface.is_supported(q).unwrap_or(false)
     }).expect("couldn't find a graphical queue family");
 
     // Now initializing the device. This is probably the most important object of Vulkan.
@@ -153,7 +143,7 @@ fn main() {
         };
 
         Device::new(physical, physical.supported_features(), &device_ext,
-                    [(queue, 0.5)].iter().cloned()).expect("failed to create device")
+                    [(queue_family, 0.5)].iter().cloned()).expect("failed to create device")
     };
 
     // Since we can request multiple queues, the `queues` variable is in fact an iterator. In this
@@ -161,30 +151,34 @@ fn main() {
     // iterator and throw it away.
     let queue = queues.next().unwrap();
 
+    // The dimensions of the surface.
+    // This variable needs to be mutable since the viewport can change size.
+    let mut dimensions;
+
     // Before we can draw on the surface, we have to create what is called a swapchain. Creating
     // a swapchain allocates the color buffers that will contain the image that will ultimately
     // be visible on the screen. These images are returned alongside with the swapchain.
     let (mut swapchain, mut images) = {
         // Querying the capabilities of the surface. When we create the swapchain we can only
         // pass values that are allowed by the capabilities.
-        let caps = window.capabilities(physical)
-                          .expect("failed to get surface capabilities");
+        let caps = surface.capabilities(physical)
+                         .expect("failed to get surface capabilities");
 
-        // We choose the dimensions of the swapchain to match the current dimensions of the window.
+        dimensions = caps.current_extent.unwrap_or([1024, 768]);
+
+        // We choose the dimensions of the swapchain to match the current extent of the surface.
         // If `caps.current_extent` is `None`, this means that the window size will be determined
         // by the dimensions of the swapchain, in which case we just use the width and height defined above.
-        //let dimensions = caps.current_extent.unwrap_or([width, height]);
 
         // The alpha mode indicates how the alpha value of the final image will behave. For example
         // you can choose whether the window will be opaque or transparent.
         let alpha = caps.supported_composite_alpha.iter().next().unwrap();
-        dimensions = caps.current_extent.unwrap_or(dimensions);
 
         // Choosing the internal format that the images will have.
         let format = caps.supported_formats[0].0;
 
         // Please take a look at the docs for the meaning of the parameters we didn't mention.
-        Swapchain::new(device.clone(), window.clone(), caps.min_image_count, format,
+        Swapchain::new(device.clone(), surface.clone(), caps.min_image_count, format,
                        dimensions, 1, caps.supported_usage_flags, &queue,
                        SurfaceTransform::Identity, alpha, PresentMode::Fifo, true,
                        None).expect("failed to create swapchain")
@@ -207,6 +201,10 @@ fn main() {
     //
     // The raw shader creation API provided by the vulkano library is unsafe, for various reasons.
     //
+    // An overview of what the `VulkanoShader` derive macro generates can be found in the
+    // `vulkano-shader-derive` crate docs. You can view them at
+    // https://docs.rs/vulkano-shader-derive/*/vulkano_shader_derive/
+    //
     // TODO: explain this in details
     mod vs {
         #[derive(VulkanoShader)]
@@ -220,6 +218,7 @@ void main() {
     gl_Position = vec4(position, 0.0, 1.0);
 }
 "]
+        #[allow(dead_code)]
         struct Dummy;
     }
 
@@ -235,6 +234,7 @@ void main() {
     f_color = vec4(1.0, 0.0, 0.0, 1.0);
 }
 "]
+        #[allow(dead_code)]
         struct Dummy;
     }
 
@@ -328,6 +328,16 @@ void main() {
     // that, we store the submission of the previous frame here.
     let mut previous_frame_end = Box::new(now(device.clone())) as Box<GpuFuture>;
 
+    let mut dynamic_state = DynamicState {
+        line_width: None,
+        viewports: Some(vec![Viewport {
+            origin: [0.0, 0.0],
+            dimensions: [dimensions[0] as f32, dimensions[1] as f32],
+            depth_range: 0.0 .. 1.0,
+        }]),
+        scissors: None,
+    };
+
     loop {
         // It is important to call this function from time to time, otherwise resources will keep
         // accumulating and you will eventually reach an out of memory error.
@@ -338,10 +348,9 @@ void main() {
         // If the swapchain needs to be recreated, recreate it
         if recreate_swapchain {
             // Get the new dimensions for the viewport/framebuffers.
-            dimensions = {
-                let (new_width, new_height) = window.window().get_inner_size().unwrap();
-                [new_width, new_height]
-            };
+            dimensions = surface.capabilities(physical)
+                        .expect("failed to get surface capabilities")
+                        .current_extent.unwrap();
 
             let (new_swapchain, new_images) = match swapchain.recreate_with_dimension(dimensions) {
                 Ok(r) => r,
@@ -353,10 +362,16 @@ void main() {
                 Err(err) => panic!("{:?}", err)
             };
 
-            mem::replace(&mut swapchain, new_swapchain);
-            mem::replace(&mut images, new_images);
+            swapchain = new_swapchain;
+            images = new_images;
 
             framebuffers = None;
+
+            dynamic_state.viewports = Some(vec![Viewport {
+                origin: [0.0, 0.0],
+                dimensions: [dimensions[0] as f32, dimensions[1] as f32],
+                depth_range: 0.0 .. 1.0,
+            }]);
 
             recreate_swapchain = false;
         }
@@ -364,12 +379,11 @@ void main() {
         // Because framebuffers contains an Arc on the old swapchain, we need to
         // recreate framebuffers as well.
         if framebuffers.is_none() {
-            let new_framebuffers = Some(images.iter().map(|image| {
+            framebuffers = Some(images.iter().map(|image| {
                 Arc::new(Framebuffer::start(render_pass.clone())
                          .add(image.clone()).unwrap()
                          .build().unwrap())
             }).collect::<Vec<_>>());
-            mem::replace(&mut framebuffers, new_framebuffers);
         }
 
         // Before we can draw on the output, we have to *acquire* an image from the swapchain. If
@@ -415,16 +429,7 @@ void main() {
             // The last two parameters contain the list of resources to pass to the shaders.
             // Since we used an `EmptyPipeline` object, the objects have to be `()`.
             .draw(pipeline.clone(),
-                  DynamicState {
-                      line_width: None,
-                      // TODO: Find a way to do this without having to dynamically allocate a Vec every frame.
-                      viewports: Some(vec![Viewport {
-                          origin: [0.0, 0.0],
-                          dimensions: [dimensions[0] as f32, dimensions[1] as f32],
-                          depth_range: 0.0 .. 1.0,
-                      }]),
-                      scissors: None,
-                  },
+                  &dynamic_state,
                   vertex_buffer.clone(), (), ())
             .unwrap()
 
@@ -447,8 +452,21 @@ void main() {
             // present command at the end of the queue. This means that it will only be presented once
             // the GPU has finished executing the command buffer that draws the triangle.
             .then_swapchain_present(queue.clone(), swapchain.clone(), image_num)
-            .then_signal_fence_and_flush().unwrap();
-        previous_frame_end = Box::new(future) as Box<_>;
+            .then_signal_fence_and_flush();
+
+        match future {
+            Ok(future) => {
+                previous_frame_end = Box::new(future) as Box<_>;
+            }
+            Err(vulkano::sync::FlushError::OutOfDate) => {
+                recreate_swapchain = true;
+                previous_frame_end = Box::new(vulkano::sync::now(device.clone())) as Box<_>;
+            }
+            Err(e) => {
+                println!("{:?}", e);
+                previous_frame_end = Box::new(vulkano::sync::now(device.clone())) as Box<_>;
+            }
+        }
 
         // Note that in more complex programs it is likely that one of `acquire_next_image`,
         // `command_buffer::submit`, or `present` will block for some time. This happens when the
@@ -463,8 +481,7 @@ void main() {
         let mut done = false;
         events_loop.poll_events(|ev| {
             match ev {
-                winit::Event::WindowEvent { event: winit::WindowEvent::Closed, .. } => done = true,
-                winit::Event::WindowEvent { event: winit::WindowEvent::Resized(_, _), .. } => recreate_swapchain = true,
+                winit::Event::WindowEvent { event: winit::WindowEvent::CloseRequested, .. } => done = true,
                 _ => ()
             }
         });

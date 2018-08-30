@@ -138,7 +138,7 @@ impl DirectionalLightingSystem {
                                                      self.pipeline.clone().subpass())
             .unwrap()
             .draw(self.pipeline.clone(),
-                  dynamic_state,
+                  &dynamic_state,
                   vec![self.vertex_buffer.clone()],
                   descriptor_set,
                   push_constants)

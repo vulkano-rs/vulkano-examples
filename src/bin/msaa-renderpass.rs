@@ -178,6 +178,7 @@ fn main() {
         gl_Position = vec4(position, 0.0, 1.0);
     }
     "]
+        #[allow(dead_code)]
         struct Dummy;
     }
 
@@ -193,6 +194,7 @@ fn main() {
         f_color = vec4(1.0, 0.0, 0.0, 1.0);
     }
     "]
+        #[allow(dead_code)]
         struct Dummy;
     }
 
@@ -236,7 +238,7 @@ fn main() {
         .begin_render_pass(framebuffer.clone(), false, vec![[0.0, 0.0, 1.0, 1.0].into(), vulkano::format::ClearValue::None])
         .unwrap()
 
-        .draw(pipeline.clone(), dynamic_state, vertex_buffer.clone(), (), ())
+        .draw(pipeline.clone(), &dynamic_state, vertex_buffer.clone(), (), ())
         .unwrap()
 
         .end_render_pass()
