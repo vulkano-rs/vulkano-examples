@@ -5,10 +5,10 @@ authors = ["Pierre Krieger <pierre.krieger1708@gmail.com>"]
 publish = false
 
 [dependencies]
-vulkano = "0.10"
-vulkano-shader-derive = "0.10"
-vulkano-win = "0.10"
+vulkano = "0.11"
+vulkano-shaders = "0.11"
+vulkano-win = "0.11"
 cgmath = "0.16"
-image = "0.19"
-winit = "0.17"
+image = "0.20"
+winit = "0.18"
 time = "0.1.37"
