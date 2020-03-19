@@ -6,9 +6,9 @@ edition = "2018"
 publish = false
 
 [dependencies]
-vulkano = "0.13"
-vulkano-shaders = "0.13"
-vulkano-win = "0.13"
+vulkano = "0.14"
+vulkano-shaders = "0.14"
+vulkano-win = "0.14"
 cgmath = "0.17"
 image = "0.21"
 winit = "0.19"
