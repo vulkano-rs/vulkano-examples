@@ -1,15 +1,22 @@
 [package]
 name = "examples"
 version = "0.1.0"
-authors = ["Pierre Krieger <pierre.krieger1708@gmail.com>"]
 edition = "2018"
+authors = ["Pierre Krieger <pierre.krieger1708@gmail.com>"]
 publish = false
 
 [dependencies]
-vulkano = "0.13"
-vulkano-shaders = "0.13"
-vulkano-win = "0.13"
+# The `vulkano` crate is the main crate that you must use to use Vulkan.
+vulkano = "0.18.0"
+# Provides the `shader!` macro that is used to generate code for using shaders.
+vulkano-shaders = "0.18.0"
+# The Vulkan library doesn't provide any functionality to create and handle windows, as
+# this would be out of scope. In order to open a window, we are going to use the `winit` crate.
+winit = "0.22"
+# The `vulkano_win` crate is the link between `vulkano` and `winit`. Vulkano doesn't know about winit,
+# and winit doesn't know about vulkano, so import a crate that will provide a link between the two.
+vulkano-win = "0.18.0"
+
 cgmath = "0.17"
-image = "0.21"
-winit = "0.19"
-time = "0.1.37"
+png = "0.15.0"
+time = "0.1.38"

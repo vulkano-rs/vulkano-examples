@@ -41,7 +41,7 @@ impl AmbientLightingSystem {
         // TODO: vulkano doesn't allow us to draw without a vertex buffer, otherwise we could
         //       hard-code these values in the shader
         let vertex_buffer = {
-            CpuAccessibleBuffer::from_iter(gfx_queue.device().clone(), BufferUsage::all(), [
+            CpuAccessibleBuffer::from_iter(gfx_queue.device().clone(), BufferUsage::all(), false, [
                 Vertex { position: [-1.0, -1.0] },
                 Vertex { position: [-1.0, 3.0] },
                 Vertex { position: [3.0, -1.0] }
@@ -105,7 +105,8 @@ impl AmbientLightingSystem {
             color: [ambient_color[0], ambient_color[1], ambient_color[2], 1.0],
         };
 
-        let descriptor_set = PersistentDescriptorSet::start(self.pipeline.clone(), 0)
+        let layout = self.pipeline.descriptor_set_layout(0).unwrap();
+        let descriptor_set = PersistentDescriptorSet::start(layout.clone())
             .add_image(color_input)
             .unwrap()
             .build()
