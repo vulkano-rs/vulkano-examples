@@ -1,4 +1,4 @@
-// Copyright (c) 2016 The vulkano developers
+// Copyright (c) 2020 The vulkano developers
 // Licensed under the Apache License, Version 2.0
 // <LICENSE-APACHE or
 // http://www.apache.org/licenses/LICENSE-2.0> or the MIT
@@ -7,20 +7,26 @@
 // notice may not be copied, modified, or distributed except
 // according to those terms.
 
-use vulkano::buffer::cpu_pool::CpuBufferPool;
-use vulkano::buffer::{BufferUsage, CpuAccessibleBuffer};
+// BufferPool Example
+//
+// Modified triangle example to show BufferPool
+// Using a pool allows multiple buffers to be "in-flight" simultaneously
+//  and is suited to highly dynamic, similar sized chunks of data
+//
+// NOTE:(jdnewman85) ATM (5/4/2020) CpuBufferPool.next() and .chunk() have identical documentation
+//      I was unable to get next() to work. The compiler complained that the resulting buffer
+//      didn't implement VertexSource. Similar issues have been reported.
+//      See: https://github.com/vulkano-rs/vulkano/issues/1221
+//      Finally, I have not profiled CpuBufferPool against CpuAccessibleBuffer
+
+use vulkano::buffer::CpuBufferPool;
 use vulkano::command_buffer::{AutoCommandBufferBuilder, DynamicState};
-use vulkano::descriptor::descriptor_set::PersistentDescriptorSet;
 use vulkano::device::{Device, DeviceExtensions};
-use vulkano::format::Format;
 use vulkano::framebuffer::{Framebuffer, FramebufferAbstract, RenderPassAbstract, Subpass};
-use vulkano::image::attachment::AttachmentImage;
 use vulkano::image::{ImageUsage, SwapchainImage};
-use vulkano::instance::Instance;
-use vulkano::instance::PhysicalDevice;
-use vulkano::pipeline::vertex::TwoBuffersDefinition;
+use vulkano::instance::{Instance, PhysicalDevice};
 use vulkano::pipeline::viewport::Viewport;
-use vulkano::pipeline::{GraphicsPipeline, GraphicsPipelineAbstract};
+use vulkano::pipeline::GraphicsPipeline;
 use vulkano::swapchain;
 use vulkano::swapchain::{
     AcquireError, ColorSpace, FullscreenExclusive, PresentMode, SurfaceTransform, Swapchain,
@@ -34,21 +40,20 @@ use winit::event::{Event, WindowEvent};
 use winit::event_loop::{ControlFlow, EventLoop};
 use winit::window::{Window, WindowBuilder};
 
-use cgmath::{Matrix3, Matrix4, Point3, Rad, Vector3};
-
-use examples::{Normal, Vertex, INDICES, NORMALS, VERTICES};
-
-use std::iter;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{SystemTime, UNIX_EPOCH};
+
+#[derive(Default, Debug, Clone)]
+struct Vertex {
+    position: [f32; 2],
+}
+vulkano::impl_vertex!(Vertex, position);
 
 fn main() {
-    // The start of this example is exactly the same as `triangle`. You should read the
-    // `triangle` example if you haven't done so yet.
-
     let required_extensions = vulkano_win::required_extensions();
     let instance = Instance::new(None, &required_extensions, None).unwrap();
     let physical = PhysicalDevice::enumerate(&instance).next().unwrap();
+
     println!(
         "Using device: {} (type: {:?})",
         physical.name(),
@@ -59,7 +64,6 @@ fn main() {
     let surface = WindowBuilder::new()
         .build_vk_surface(&event_loop, instance.clone())
         .unwrap();
-    let dimensions: [u32; 2] = surface.window().inner_size().into();
 
     let queue_family = physical
         .queue_families()
@@ -70,7 +74,6 @@ fn main() {
         khr_swapchain: true,
         ..DeviceExtensions::none()
     };
-
     let (device, mut queues) = Device::new(
         physical,
         physical.supported_features(),
@@ -83,8 +86,9 @@ fn main() {
 
     let (mut swapchain, images) = {
         let caps = surface.capabilities(physical).unwrap();
-        let format = caps.supported_formats[0].0;
         let alpha = caps.supported_composite_alpha.iter().next().unwrap();
+        let format = caps.supported_formats[0].0;
+        let dimensions: [u32; 2] = surface.window().inner_size().into();
 
         Swapchain::new(
             device.clone(),
@@ -105,54 +109,85 @@ fn main() {
         .unwrap()
     };
 
-    let vertices = VERTICES.iter().cloned();
-    let vertex_buffer =
-        CpuAccessibleBuffer::from_iter(device.clone(), BufferUsage::all(), false, vertices)
-            .unwrap();
+    // Vertex Buffer Pool
+    let buffer_pool: CpuBufferPool<Vertex> = CpuBufferPool::vertex_buffer(device.clone());
 
-    let normals = NORMALS.iter().cloned();
-    let normals_buffer =
-        CpuAccessibleBuffer::from_iter(device.clone(), BufferUsage::all(), false, normals).unwrap();
+    mod vs {
+        vulkano_shaders::shader! {
+            ty: "vertex",
+            src: "
+				#version 450
 
-    let indices = INDICES.iter().cloned();
-    let index_buffer =
-        CpuAccessibleBuffer::from_iter(device.clone(), BufferUsage::all(), false, indices).unwrap();
+				layout(location = 0) in vec2 position;
 
-    let uniform_buffer = CpuBufferPool::<vs::ty::Data>::new(device.clone(), BufferUsage::all());
+				void main() {
+					gl_Position = vec4(position, 0.0, 1.0);
+				}
+			"
+        }
+    }
+
+    mod fs {
+        vulkano_shaders::shader! {
+            ty: "fragment",
+            src: "
+				#version 450
+
+				layout(location = 0) out vec4 f_color;
+
+				void main() {
+					f_color = vec4(1.0, 0.0, 0.0, 1.0);
+				}
+			"
+        }
+    }
 
     let vs = vs::Shader::load(device.clone()).unwrap();
     let fs = fs::Shader::load(device.clone()).unwrap();
 
     let render_pass = Arc::new(
-        vulkano::single_pass_renderpass!(device.clone(),
+        vulkano::single_pass_renderpass!(
+            device.clone(),
             attachments: {
                 color: {
                     load: Clear,
                     store: Store,
                     format: swapchain.format(),
                     samples: 1,
-                },
-                depth: {
-                    load: Clear,
-                    store: DontCare,
-                    format: Format::D16Unorm,
-                    samples: 1,
                 }
             },
             pass: {
                 color: [color],
-                depth_stencil: {depth}
+                depth_stencil: {}
             }
         )
         .unwrap(),
     );
 
-    let (mut pipeline, mut framebuffers) =
-        window_size_dependent_setup(device.clone(), &vs, &fs, &images, render_pass.clone());
-    let mut recreate_swapchain = false;
+    let pipeline = Arc::new(
+        GraphicsPipeline::start()
+            .vertex_input_single_buffer()
+            .vertex_shader(vs.main_entry_point(), ())
+            .triangle_list()
+            .viewports_dynamic_scissors_irrelevant(1)
+            .fragment_shader(fs.main_entry_point(), ())
+            .render_pass(Subpass::from(render_pass.clone(), 0).unwrap())
+            .build(device.clone())
+            .unwrap(),
+    );
 
+    let mut dynamic_state = DynamicState {
+        line_width: None,
+        viewports: None,
+        scissors: None,
+        compare_mask: None,
+        write_mask: None,
+        reference: None,
+    };
+    let mut framebuffers =
+        window_size_dependent_setup(&images, render_pass.clone(), &mut dynamic_state);
+    let mut recreate_swapchain = false;
     let mut previous_frame_end = Some(sync::now(device.clone()).boxed());
-    let rotation_start = Instant::now();
 
     event_loop.run(move |event, _, control_flow| {
         match event {
@@ -181,57 +216,13 @@ fn main() {
                         };
 
                     swapchain = new_swapchain;
-                    let (new_pipeline, new_framebuffers) = window_size_dependent_setup(
-                        device.clone(),
-                        &vs,
-                        &fs,
+                    framebuffers = window_size_dependent_setup(
                         &new_images,
                         render_pass.clone(),
+                        &mut dynamic_state,
                     );
-                    pipeline = new_pipeline;
-                    framebuffers = new_framebuffers;
                     recreate_swapchain = false;
                 }
-
-                let uniform_buffer_subbuffer = {
-                    let elapsed = rotation_start.elapsed();
-                    let rotation =
-                        elapsed.as_secs() as f64 + elapsed.subsec_nanos() as f64 / 1_000_000_000.0;
-                    let rotation = Matrix3::from_angle_y(Rad(rotation as f32));
-
-                    // note: this teapot was meant for OpenGL where the origin is at the lower left
-                    //       instead the origin is at the upper left in Vulkan, so we reverse the Y axis
-                    let aspect_ratio = dimensions[0] as f32 / dimensions[1] as f32;
-                    let proj = cgmath::perspective(
-                        Rad(std::f32::consts::FRAC_PI_2),
-                        aspect_ratio,
-                        0.01,
-                        100.0,
-                    );
-                    let view = Matrix4::look_at(
-                        Point3::new(0.3, 0.3, 1.0),
-                        Point3::new(0.0, 0.0, 0.0),
-                        Vector3::new(0.0, -1.0, 0.0),
-                    );
-                    let scale = Matrix4::from_scale(0.01);
-
-                    let uniform_data = vs::ty::Data {
-                        world: Matrix4::from(rotation).into(),
-                        view: (view * scale).into(),
-                        proj: proj.into(),
-                    };
-
-                    uniform_buffer.next(uniform_data).unwrap()
-                };
-
-                let layout = pipeline.descriptor_set_layout(0).unwrap();
-                let set = Arc::new(
-                    PersistentDescriptorSet::start(layout.clone())
-                        .add_buffer(uniform_buffer_subbuffer)
-                        .unwrap()
-                        .build()
-                        .unwrap(),
-                );
 
                 let (image_num, suboptimal, acquire_future) =
                     match swapchain::acquire_next_image(swapchain.clone(), None) {
@@ -247,26 +238,51 @@ fn main() {
                     recreate_swapchain = true;
                 }
 
+                let clear_values = vec![[0.0, 0.0, 1.0, 1.0].into()];
+
+                // Rotate once (PI*2) every 5 seconds
+                let elapsed = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs_f64();
+                const DURATION: f64 = 5.0;
+                let remainder = elapsed.rem_euclid(DURATION);
+                let delta = (remainder / DURATION) as f32;
+                let angle = delta * std::f32::consts::PI * 2.0;
+                const RADIUS: f32 = 0.5;
+                // 120Degree offset in radians
+                const ANGLE_OFFSET: f32 = (std::f32::consts::PI * 2.0) / 3.0;
+                // Calculate vertices
+                let data = [
+                    Vertex {
+                        position: [angle.cos() * RADIUS, angle.sin() * RADIUS],
+                    },
+                    Vertex {
+                        position: [
+                            (angle + ANGLE_OFFSET).cos() * RADIUS,
+                            (angle + ANGLE_OFFSET).sin() * RADIUS,
+                        ],
+                    },
+                    Vertex {
+                        position: [
+                            (angle - ANGLE_OFFSET).cos() * RADIUS,
+                            (angle - ANGLE_OFFSET).sin() * RADIUS,
+                        ],
+                    },
+                ];
+
+                // Allocate a new chunk from buffer_pool
+                let buffer = buffer_pool.chunk(data.to_vec()).unwrap();
                 let mut builder = AutoCommandBufferBuilder::primary_one_time_submit(
                     device.clone(),
                     queue.family(),
                 )
                 .unwrap();
                 builder
-                    .begin_render_pass(
-                        framebuffers[image_num].clone(),
-                        false,
-                        vec![[0.0, 0.0, 1.0, 1.0].into(), 1f32.into()],
-                    )
+                    .begin_render_pass(framebuffers[image_num].clone(), false, clear_values)
                     .unwrap()
-                    .draw_indexed(
-                        pipeline.clone(),
-                        &DynamicState::none(),
-                        vec![vertex_buffer.clone(), normals_buffer.clone()],
-                        index_buffer.clone(),
-                        set.clone(),
-                        (),
-                    )
+                    // Draw our buffer
+                    .draw(pipeline.clone(), &dynamic_state, buffer, (), ())
                     .unwrap()
                     .end_render_pass()
                     .unwrap();
@@ -283,15 +299,15 @@ fn main() {
 
                 match future {
                     Ok(future) => {
-                        previous_frame_end = Some(future.boxed());
+                        previous_frame_end = Some(Box::new(future) as Box<_>);
                     }
                     Err(FlushError::OutOfDate) => {
                         recreate_swapchain = true;
-                        previous_frame_end = Some(sync::now(device.clone()).boxed());
+                        previous_frame_end = Some(Box::new(sync::now(device.clone())) as Box<_>);
                     }
                     Err(e) => {
                         println!("Failed to flush future: {:?}", e);
-                        previous_frame_end = Some(sync::now(device.clone()).boxed());
+                        previous_frame_end = Some(Box::new(sync::now(device.clone())) as Box<_>);
                     }
                 }
             }
@@ -302,70 +318,29 @@ fn main() {
 
 /// This method is called once during initialization, then again whenever the window is resized
 fn window_size_dependent_setup(
-    device: Arc<Device>,
-    vs: &vs::Shader,
-    fs: &fs::Shader,
     images: &[Arc<SwapchainImage<Window>>],
     render_pass: Arc<dyn RenderPassAbstract + Send + Sync>,
-) -> (
-    Arc<dyn GraphicsPipelineAbstract + Send + Sync>,
-    Vec<Arc<dyn FramebufferAbstract + Send + Sync>>,
-) {
+    dynamic_state: &mut DynamicState,
+) -> Vec<Arc<dyn FramebufferAbstract + Send + Sync>> {
     let dimensions = images[0].dimensions();
 
-    let depth_buffer =
-        AttachmentImage::transient(device.clone(), dimensions, Format::D16Unorm).unwrap();
+    let viewport = Viewport {
+        origin: [0.0, 0.0],
+        dimensions: [dimensions[0] as f32, dimensions[1] as f32],
+        depth_range: 0.0..1.0,
+    };
+    dynamic_state.viewports = Some(vec![viewport]);
 
-    let framebuffers = images
+    images
         .iter()
         .map(|image| {
             Arc::new(
                 Framebuffer::start(render_pass.clone())
                     .add(image.clone())
                     .unwrap()
-                    .add(depth_buffer.clone())
-                    .unwrap()
                     .build()
                     .unwrap(),
             ) as Arc<dyn FramebufferAbstract + Send + Sync>
         })
-        .collect::<Vec<_>>();
-
-    // In the triangle example we use a dynamic viewport, as its a simple example.
-    // However in the teapot example, we recreate the pipelines with a hardcoded viewport instead.
-    // This allows the driver to optimize things, at the cost of slower window resizes.
-    // https://computergraphics.stackexchange.com/questions/5742/vulkan-best-way-of-updating-pipeline-viewport
-    let pipeline = Arc::new(
-        GraphicsPipeline::start()
-            .vertex_input(TwoBuffersDefinition::<Vertex, Normal>::new())
-            .vertex_shader(vs.main_entry_point(), ())
-            .triangle_list()
-            .viewports_dynamic_scissors_irrelevant(1)
-            .viewports(iter::once(Viewport {
-                origin: [0.0, 0.0],
-                dimensions: [dimensions[0] as f32, dimensions[1] as f32],
-                depth_range: 0.0..1.0,
-            }))
-            .fragment_shader(fs.main_entry_point(), ())
-            .depth_stencil_simple_depth()
-            .render_pass(Subpass::from(render_pass.clone(), 0).unwrap())
-            .build(device.clone())
-            .unwrap(),
-    );
-
-    (pipeline, framebuffers)
-}
-
-mod vs {
-    vulkano_shaders::shader! {
-        ty: "vertex",
-        path: "src/bin/teapot/vert.glsl"
-    }
-}
-
-mod fs {
-    vulkano_shaders::shader! {
-        ty: "fragment",
-        path: "src/bin/teapot/frag.glsl"
-    }
+        .collect::<Vec<_>>()
 }
