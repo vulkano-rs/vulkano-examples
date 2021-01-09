@@ -1,8 +1,8 @@
 // Copyright (c) 2017 The vulkano developers
 // Licensed under the Apache License, Version 2.0
 // <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT
-// license <LICENSE-MIT or http://opensource.org/licenses/MIT>,
+// https://www.apache.org/licenses/LICENSE-2.0> or the MIT
+// license <LICENSE-MIT or https://opensource.org/licenses/MIT>,
 // at your option. All files in the project carrying such
 // notice may not be copied, modified, or distributed except
 // according to those terms.
@@ -26,6 +26,7 @@
 // drawn after the lighting, and that the whole process consumes more memory.
 
 use vulkano::device::{Device, DeviceExtensions};
+use vulkano::image::ImageUsage;
 use vulkano::instance::{Instance, PhysicalDevice};
 use vulkano::swapchain;
 use vulkano::swapchain::{
@@ -34,7 +35,6 @@ use vulkano::swapchain::{
 };
 use vulkano::sync;
 use vulkano::sync::{FlushError, GpuFuture};
-use vulkano::image::ImageUsage;
 
 use vulkano_win::VkSurfaceBuild;
 use winit::event::{Event, WindowEvent};
