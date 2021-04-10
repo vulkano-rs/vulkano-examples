@@ -1,19 +1,19 @@
 // Copyright (c) 2016 The vulkano developers
 // Licensed under the Apache License, Version 2.0
 // <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT
-// license <LICENSE-MIT or http://opensource.org/licenses/MIT>,
+// https://www.apache.org/licenses/LICENSE-2.0> or the MIT
+// license <LICENSE-MIT or https://opensource.org/licenses/MIT>,
 // at your option. All files in the project carrying such
 // notice may not be copied, modified, or distributed except
 // according to those terms.
 
 use vulkano::buffer::{BufferUsage, CpuAccessibleBuffer};
-use vulkano::command_buffer::{AutoCommandBufferBuilder, DynamicState};
+use vulkano::command_buffer::{AutoCommandBufferBuilder, DynamicState, SubpassContents};
 use vulkano::descriptor::descriptor_set::PersistentDescriptorSet;
 use vulkano::device::{Device, DeviceExtensions};
 use vulkano::format::Format;
 use vulkano::framebuffer::{Framebuffer, FramebufferAbstract, RenderPassAbstract, Subpass};
-use vulkano::image::{Dimensions, ImageUsage, ImmutableImage, SwapchainImage};
+use vulkano::image::{Dimensions, ImageUsage, ImmutableImage, MipmapsCount, SwapchainImage};
 use vulkano::instance::{Instance, PhysicalDevice};
 use vulkano::pipeline::viewport::Viewport;
 use vulkano::pipeline::GraphicsPipeline;
@@ -163,6 +163,7 @@ fn main() {
         ImmutableImage::from_iter(
             image_data.iter().cloned(),
             dimensions,
+            MipmapsCount::One,
             Format::R8G8B8A8Srgb,
             queue.clone(),
         )
@@ -273,7 +274,11 @@ fn main() {
                 AutoCommandBufferBuilder::primary_one_time_submit(device.clone(), queue.family())
                     .unwrap();
             builder
-                .begin_render_pass(framebuffers[image_num].clone(), false, clear_values)
+                .begin_render_pass(
+                    framebuffers[image_num].clone(),
+                    SubpassContents::Inline,
+                    clear_values,
+                )
                 .unwrap()
                 .draw(
                     pipeline.clone(),
