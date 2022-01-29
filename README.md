@@ -1,4 +1,4 @@
-**Notice**. This repository contains an old outdated set of Vulkano examples. All examples were migrated to the primary [Vulkano repository](https://github.com/vulkano-rs/vulkano/tree/master/examples) where we keep them up to date with the recent changes in Vulkano. Contribution to the example set is very welcome! For this purpose you can open a PR directly to the primary repository.
+**Notice.** This repository contains an outdated set of Vulkano examples. All examples have migrated to the primary [Vulkano repository](https://github.com/vulkano-rs/vulkano/tree/master/examples) where we keep them up to date with the recent changes in Vulkano. Contribution to the example set is very welcome! For this purpose, you can open a PR directly to the primary repository.
 
 # Vulkano examples
 
